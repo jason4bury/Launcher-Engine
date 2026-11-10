@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- Home only: the README example, comments and notes now use the Home Launcher
+  (`profile.home.json`, `E:\Created\Home\Home-Launcher`).
+  README headings now use the Home house-style emoji.
+
 ## [1.00] - 2026-11-10
 First release.
 
@@ -25,5 +30,5 @@ First release.
   GitHub), status bar, About box, keyboard shortcuts, colours and logo from the profile.
 - Settings (a chosen tools folder) in `%APPDATA%\<launcher name>\settings.json`.
 - Private tools (`"Private": true`) are never shown while the profile's `PrivateLock` is
-  off. The unlock itself comes with the Home launcher.
+  off. The unlock itself comes with the Home Launcher.
 - `tests\Invoke-EngineTests.ps1` checks discovery against a made-up tools folder.
