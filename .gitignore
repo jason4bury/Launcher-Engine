@@ -1,0 +1,15 @@
+# The engine has no exe of its own; launchers bundle it. Safety net anyway.
+*.exe
+*.bundle.ps1
+
+# Logs and temp files
+*.log
+*.tmp
+
+# Windows clutter
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+*.swp
