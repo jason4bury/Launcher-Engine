@@ -14,6 +14,14 @@ $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot '..\src\Launcher-Engine.ps1')
 
+function New-TestSecureString([string]$Text) {
+    # Builds a SecureString one character at a time (test data only).
+    $secure = New-Object System.Security.SecureString
+    foreach ($c in $Text.ToCharArray()) { $secure.AppendChar($c) }
+    $secure.MakeReadOnly()
+    return $secure
+}
+
 $script:Failures = 0
 function Assert-Equal {
     param($Actual, $Expected, [string]$What)
@@ -63,17 +71,38 @@ try {
     New-TestFile (Join-Path $root 'Just-A-Folder\notes.txt') 'x'
     New-TestFile (Join-Path $root 'Secret-Tool\Builds\Secret Tool v1.00.exe') 'x'
     New-TestFile (Join-Path $root 'Secret-Tool\launcher.json') '{ "Private": true }'
+    New-TestFile (Join-Path $root 'Flagged-Tool\Source\build.json') '{ "AppName": "Flagged Tool", "Private": true }'
+    New-TestFile (Join-Path $root 'Flagged-Tool\Builds\Flagged Tool v1.00.exe') 'x'
+
+    # Tool D: a Docker web app, no build, URL from the profile, icon by name
+    $d = Join-Path $root 'Delta-Web'
+    New-TestFile (Join-Path $d 'Source\CHANGELOG.md') "## [1.00] - 2026-11-07`n"
+    New-TestFile (Join-Path $d 'Source\assets\Delta-Web.ico') 'x'
+    New-TestFile (Join-Path $d 'Source\assets\Delta-Web.png') 'x'
+    New-Item -ItemType Directory -Path (Join-Path $d 'Builds') -Force | Out-Null
+
+    # A private root (like Home\Private\): everything in it is private
+    New-TestFile (Join-Path $root 'Vaulted\Hidden-Tool\Builds\Hidden Tool v1.00.exe') 'x'
+    New-TestFile (Join-Path $root 'Vaulted\Hidden-Tool\Source\CHANGELOG.md') "## [1.00] - 2026-11-07`n"
+    New-TestFile (Join-Path $root 'Vaulted\Sorted-Tool\Builds\Sorted Tool v1.00.exe') 'x'
+    New-TestFile (Join-Path $root 'Vaulted\Sorted-Tool\launcher.json') '{ "Category": "Own group" }'
 
     $profileJson = @'
 {
   "Name": "Test Launcher",
   "Roots": [".."],
   "PrivateLock": false,
-  "Exclude": ["The-Launcher"],
-  "Tools": { "Gamma-Script": { "Category": "Scripts" }, "Alpha-Tool": { "Category": "Main" } }
+  "Exclude": ["The-Launcher", "Vaulted"],
+  "PrivateRoots": ["..\\Vaulted"],
+  "Tools": {
+    "Gamma-Script": { "Category": "Scripts" },
+    "Alpha-Tool": { "Category": "Main" },
+    "Delta-Web": { "Category": "Web", "Url": "http://localhost:3000" }
+  }
 }
 '@
     $launcherProfile = $profileJson | ConvertFrom-Json
+    $lockedProfile = $profileJson.Replace('"PrivateLock": false', '"PrivateLock": true') | ConvertFrom-Json
 
     Write-Host 'Roots'
     $roots = @(Resolve-LauncherRoots -LauncherProfile $launcherProfile -LauncherHome (Join-Path $root 'The-Launcher') -Settings $null)
@@ -82,11 +111,23 @@ try {
     $roots2 = @(Resolve-LauncherRoots -LauncherProfile $launcherProfile -LauncherHome 'C:\nowhere' -Settings @{ Roots = @($root) })
     Assert-Equal $roots2[0] $root 'saved Roots setting wins'
 
-    $tools = @(Get-LauncherTools -LauncherProfile $launcherProfile -Roots $roots)
+    $privateRoots = @(Resolve-LauncherRoots -LauncherProfile $launcherProfile -LauncherHome (Join-Path $root 'The-Launcher') -Key 'PrivateRoots')
+    Assert-Equal $privateRoots[0] ([IO.Path]::GetFullPath((Join-Path $root 'Vaulted'))) 'PrivateRoots resolve the same way'
+    $privateRoots2 = @(Resolve-LauncherRoots -LauncherProfile $launcherProfile -LauncherHome (Join-Path $root 'The-Launcher') -Settings @{ Roots = @($root) } -Key 'PrivateRoots')
+    Assert-Equal $privateRoots2[0] $privateRoots[0] 'a saved Roots setting does not move PrivateRoots'
+
+    $tools = @(Get-LauncherTools -LauncherProfile $launcherProfile -Roots $roots -PrivateRoots $privateRoots)
     Write-Host 'Discovery'
-    Assert-Equal (($tools | ForEach-Object Folder | Sort-Object) -join ',') 'Alpha-Tool,Beta-Page,Gamma-Script' 'finds the three tools, skips _templates, excluded, plain and private folders'
-    $withPrivate = @(Get-LauncherTools -LauncherProfile $launcherProfile -Roots $roots -IncludePrivate)
-    Assert-Equal $withPrivate.Count 3 'private tools stay hidden when PrivateLock is off, even with -IncludePrivate'
+    Assert-Equal (($tools | ForEach-Object Folder | Sort-Object) -join ',') 'Alpha-Tool,Beta-Page,Delta-Web,Gamma-Script' 'finds the four tools, skips _templates, excluded, plain and private folders'
+    $withPrivate = @(Get-LauncherTools -LauncherProfile $launcherProfile -Roots $roots -PrivateRoots $privateRoots -IncludePrivate)
+    Assert-Equal $withPrivate.Count 4 'private tools stay hidden when PrivateLock is off, even with -IncludePrivate'
+    $lockedHidden = @(Get-LauncherTools -LauncherProfile $lockedProfile -Roots $roots -PrivateRoots $privateRoots)
+    Assert-Equal $lockedHidden.Count 4 'private tools stay hidden until unlocked'
+    $unlocked = @(Get-LauncherTools -LauncherProfile $lockedProfile -Roots $roots -PrivateRoots $privateRoots -IncludePrivate)
+    Assert-Equal (($unlocked | Where-Object Private | ForEach-Object Folder | Sort-Object) -join ',') 'Flagged-Tool,Hidden-Tool,Secret-Tool,Sorted-Tool' 'unlocked: flagged tools and everything under PrivateRoots'
+    Assert-Equal (($unlocked | Where-Object Folder -eq 'Hidden-Tool').Category) 'Private' 'private tools without a category go under Private'
+    Assert-Equal (($unlocked | Where-Object Folder -eq 'Sorted-Tool').Category) 'Own group' 'a private tool can keep its own category'
+    Assert-Equal (($unlocked | Where-Object Folder -eq 'Flagged-Tool').Private) $true 'Private read from build.json'
 
     $ta = $tools | Where-Object Folder -eq 'Alpha-Tool'
     Write-Host 'Alpha (exe)'
@@ -118,6 +159,31 @@ try {
     Assert-Equal $tc.Mode 'powershell' 'falls back to the .ps1'
     Assert-Equal (Split-Path -Leaf $tc.Target) 'Gamma-Script.ps1' 'script in Source\src'
     Assert-Equal $tc.RepoUrl '' 'no repo link without a remote'
+
+    $td = $tools | Where-Object Folder -eq 'Delta-Web'
+    Write-Host 'Delta (web app)'
+    Assert-Equal $td.Mode 'url' 'web app opens its URL'
+    Assert-Equal $td.Target 'http://localhost:3000' 'URL from the profile'
+    Assert-Equal (Split-Path -Leaf $td.IconPath) 'Delta-Web.png' 'icon found as assets\<Folder>.png'
+    Assert-Equal $td.Warning '' 'no missing-build warning for a web app'
+
+    Write-Host 'Password'
+    $pw = New-TestSecureString 'correct horse'
+    $stored = (New-LauncherPasswordHash -Password $pw) | ConvertTo-Json | ConvertFrom-Json
+    Assert-Equal $stored.Algorithm 'PBKDF2-SHA256' 'hash type'
+    Assert-Equal ($stored.PSObject.Properties.Name -contains 'Password') $false 'the password itself is not stored'
+    Assert-Equal (Test-LauncherPassword -Password $pw -Stored $stored) $true 'right password accepted'
+    Assert-Equal (Test-LauncherPassword -Password (New-TestSecureString 'Correct horse') -Stored $stored) $false 'wrong password refused'
+    Assert-Equal (Test-LauncherPassword -Password $pw -Stored $null) $false 'no saved hash refuses'
+    $other = (New-LauncherPasswordHash -Password $pw) | ConvertTo-Json | ConvertFrom-Json
+    Assert-Equal ($other.Salt -ne $stored.Salt) $true 'a fresh salt every time'
+
+    Write-Host 'Vault'
+    $vp = '{ "Vault": { "Image": "..\\_vault\\Private.vhdx", "MountPath": "..\\Vaulted" } }' | ConvertFrom-Json
+    $vault = Get-LauncherVault -LauncherProfile $vp -LauncherHome (Join-Path $root 'The-Launcher')
+    Assert-Equal $vault.Image ([IO.Path]::GetFullPath((Join-Path $root '_vault\Private.vhdx'))) 'vault image path'
+    Assert-Equal (Test-LauncherVaultOpen $vault) $false 'a plain folder is not an open vault'
+    Assert-Equal ((Invoke-LauncherVault -Action Unlock -Vault $vault -Password $pw).Result) 'failed' 'no vault file: nothing is attempted'
 
     Write-Host 'Helpers'
     Assert-Equal (ConvertTo-LauncherVersion '1.10') '1.10' 'version parse'

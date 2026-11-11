@@ -6,7 +6,7 @@
 
 The shared code behind the Home Launcher: finds tools from the folder layout and shows them as tiles you can search and start.
 
-![Version](https://img.shields.io/badge/version-v1.00-blue) ![Platform](https://img.shields.io/badge/platform-Windows-0078D6) ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207-5391FE) ![Licence](https://img.shields.io/badge/licence-MIT-green)
+![Version](https://img.shields.io/badge/version-v1.01-blue) ![Platform](https://img.shields.io/badge/platform-Windows-0078D6) ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207-5391FE) ![Licence](https://img.shields.io/badge/licence-MIT-green)
 
 ## ✨ Features
 
@@ -17,7 +17,8 @@ One PowerShell/WPF codebase, so a fix or feature lands in every launcher at once
 
   | From | It reads |
   | --- | --- |
-  | `Source\build.json` | `AppName`, `Icon`, `Type` (`html`), `RequireAdmin` / `Ps2exe.RequireAdmin` |
+  | `Source\build.json` | `AppName`, `Icon`, `Type` (`html`), `RequireAdmin` / `Ps2exe.RequireAdmin`, `Private` |
+  | `Source\assets\` | `<Folder>.png` / `.ico` as the icon when none is named |
   | `Source\CHANGELOG.md` | Version and date of the newest released entry |
   | `Source\README.md` | The one-line tagline under the title |
   | `Source\docs\` | A help guide (`*Help*` / `*Guide*` `.pdf` or `.html`) |
@@ -27,7 +28,8 @@ One PowerShell/WPF codebase, so a fix or feature lands in every launcher at once
 - Falls back to the main script in `Source\src\` (`build.json`'s `EntryScript`, or `<Folder>.ps1` / `.py` / `.html`) when there's no build.
 - Starts exes, PowerShell and Python scripts, batch files, web pages and web-app URLs, with **Run as admin**.
 - The window: tiles grouped by category, search, quick links (folder, help, GitHub), status bar, About box, keyboard shortcuts, and colours, logo and titles from the profile.
-- Private tools (`"Private": true`) never appear while the profile's `PrivateLock` is off. The unlock (password prompt, vault mount, re-lock on close and idle) is added with the Home Launcher.
+- **Private-tool lock**: private tools (anything under the profile's `PrivateRoots`, or flagged `"Private": true`) stay completely hidden until Ctrl+Shift+U and the launcher password. **Lock**, the same keys, idle time or closing the window hides them again. Only a salted PBKDF2-SHA256 hash of the password is kept.
+- **Vault**: if the profile names a BitLocker VHDX, unlocking also attaches and unlocks it with the same password (UAC prompt), and locking locks and detaches it, unless a tool is still running from it.
 
 ## 📋 Requirements
 
@@ -45,7 +47,7 @@ A wrapper dot-sources the engine and calls `Start-Launcher`:
 . 'E:\Created\_shared\Launcher-Engine\Source\src\Launcher-Engine.ps1'
 $launcherProfile = Get-Content .\profile.home.json -Raw | ConvertFrom-Json
 Start-Launcher -LauncherProfile $launcherProfile -LauncherHome 'E:\Created\Home\Home-Launcher' `
-    -AppName 'Home Launcher' -AppVersion '1.00' -AppDate '2026-11-10' `
+    -AppName 'Home Launcher' -AppVersion '1.00' -AppDate '2026-11-11' `
     -AppCopyright 'Copyright (c) 2026 Jason Rhodes' -AssetPath '.\assets'
 ```
 
@@ -57,7 +59,7 @@ Start-Launcher -LauncherProfile $launcherProfile -LauncherHome 'E:\Created\Home\
 | `Assets` | Images embedded by a build, as `@{ 'file.png' = '<base64>' }` |
 | `AssetPath` | Folder to load the profile's `Logo` and `Icon` from when not embedded |
 
-The discovery functions (`Get-LauncherTools`, `Get-LauncherTool`, `Resolve-LauncherRoots`, `Invoke-LauncherTool`) can be used on their own, without a window.
+The discovery functions (`Get-LauncherTools`, `Get-LauncherTool`, `Resolve-LauncherRoots`, `Invoke-LauncherTool`) and the lock helpers (`New-LauncherPasswordHash`, `Test-LauncherPassword`, `Invoke-LauncherVault`) can be used on their own, without a window.
 
 ### Tests
 
@@ -65,7 +67,7 @@ The discovery functions (`Get-LauncherTools`, `Get-LauncherTool`, `Resolve-Launc
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\Invoke-EngineTests.ps1
 ```
 
-Builds a made-up tools folder in `%TEMP%`, checks what discovery finds, and deletes it again.
+Builds a made-up tools folder in `%TEMP%`, checks what discovery finds (including private roots and web apps) and the password hashing, and deletes it again. The vault itself needs a real VHDX, so it is only checked to do nothing when there isn't one.
 
 ## ⚙️ Configuration
 
@@ -80,11 +82,15 @@ Builds a made-up tools folder in `%TEMP%`, checks what discovery finds, and dele
 | `Categories`, `DefaultCategory` | Category order, and the category for tools without one |
 | `Exclude` | Folder names to skip |
 | `Tools` | Per-tool defaults by folder name (any `launcher.json` setting) |
-| `PrivateLock` | `true` to allow private tools (those under `Home\Private\`) |
+| `PrivateLock` | `true` turns on the private-tool lock (Ctrl+Shift+U) |
+| `PrivateRoots` | Folders whose tools are all private, scanned only when unlocked (e.g. `..\Private`) |
+| `PrivateCategory` | Group for private tools without a category (default `Private`) |
+| `IdleLockMinutes` | Hide private tools again after this long without use (default 10, `0` = only on close) |
+| `Vault.Image`, `Vault.MountPath` | The BitLocker VHDX and the folder it mounts at, unlocked with the same password |
 
 **launcher.json** (optional, in a tool's project folder or `Source\`): `Name`, `Category`, `Description`, `Icon`, `Help`, `Repo`, `RequireAdmin`, `Private`, `Hidden`, `Target` (relative to the project folder), `RunMode` (`exe`, `powershell`, `python`, `cmd`, `html`, `url`) and `Url`. It wins over the profile, which wins over `build.json`.
 
-**Settings** are saved in `%APPDATA%\<AppName>\settings.json`: just `Roots`, when a folder is chosen with **Tools folder...**.
+**Settings** are saved in `%APPDATA%\<AppName>\settings.json`: `Roots`, when a folder is chosen with **Tools folder...**, and `PrivatePassword` (salt and hash only). Delete `PrivatePassword` from the file to set a new password on the next unlock. The vault helper runs from `%LOCALAPPDATA%\<AppName>\vault\`.
 
 ## 📝 Changelog
 

@@ -20,6 +20,12 @@
     plus Source\CHANGELOG.md (version and date), Source\README.md (tagline)
     and Source\.git\config (repo link). Nothing is fetched from the internet.
 
+    Private tools (the profile's PrivateRoots, e.g. Home\Private\, or any
+    tool flagged "Private": true) stay hidden until they are unlocked with
+    the launcher password (Ctrl+Shift+U). If the profile names a Vault, the
+    same password also attaches and unlocks the BitLocker VHDX that holds
+    them, and locking (button, idle time or closing) locks it again.
+
 .NOTES
     Author:    Jason Rhodes
     Copyright: (c) 2026 Jason Rhodes - MIT licence (see LICENSE)
@@ -30,8 +36,8 @@
 #Requires -Version 5.1
 
 $script:EngineName    = 'Launcher Engine'
-$script:EngineVersion = '1.00'
-$script:EngineDate    = '2026-11-10'
+$script:EngineVersion = '1.01'
+$script:EngineDate    = '2026-11-11'
 
 # ===========================================================================
 #  Small helpers
@@ -193,7 +199,8 @@ function Get-LauncherTool {
     <# Reads one project folder. Returns $null if it isn't a tool. #>
     param(
         [Parameter(Mandatory)][string]$ProjectPath,
-        [object]$ProfileEntry
+        [object]$ProfileEntry,
+        [switch]$PrivateRoot
     )
     $folder     = Split-Path -Leaf $ProjectPath
     $sourcePath = Join-Path $ProjectPath 'Source'
@@ -228,7 +235,7 @@ function Get-LauncherTool {
         Target       = $null
         Mode         = $null
         RequireAdmin = ConvertTo-LauncherBool (Get-LauncherValue $layers @('RequireAdmin', 'Ps2exe.RequireAdmin'))
-        Private      = ConvertTo-LauncherBool (Get-LauncherValue @($ProfileEntry, $launcher) @('Private'))
+        Private      = ($PrivateRoot -or (ConvertTo-LauncherBool (Get-LauncherValue $layers @('Private'))))
         Hidden       = ConvertTo-LauncherBool (Get-LauncherValue @($ProfileEntry, $launcher) @('Hidden'))
         IconPath     = $null
         HelpPath     = $null
@@ -292,6 +299,12 @@ function Get-LauncherTool {
         }
         $tool.IconPath = $iconPath
     }
+    if (-not $tool.IconPath) {
+        # No icon named anywhere: use assets\<Folder>.png (or .ico) if the
+        # tool has one, as the Docker apps do.
+        $tool.IconPath = @('.png', '.ico') | ForEach-Object { Join-Path $sourcePath "assets\$folder$_" } |
+                         Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+    }
 
     # --- README tagline, help guide, repo link ---
     $readme = Join-Path $sourcePath 'README.md'
@@ -322,51 +335,79 @@ function Get-LauncherTool {
 function Get-LauncherTools {
     <# Every tool under the root folders, sorted by category then name.
        Folders starting with _ or . and the profile's Exclude list are
-       skipped. Private tools are only returned with -IncludePrivate, and
-       never when the profile has PrivateLock turned off. #>
+       skipped. Private tools (flagged "Private", or anything under
+       PrivateRoots) are only returned with -IncludePrivate, and never when
+       the profile has PrivateLock turned off. Private tools without a
+       category go under the profile's PrivateCategory ("Private"). #>
     param(
         [Parameter(Mandatory)][object]$LauncherProfile,
-        [Parameter(Mandatory)][string[]]$Roots,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Roots,
+        [string[]]$PrivateRoots = @(),
         [switch]$IncludePrivate
     )
     $exclude = @(Get-LauncherValue @($LauncherProfile) @('Exclude')) | Where-Object { $_ }
     $entries = Get-LauncherValue @($LauncherProfile) @('Tools')
     $allowPrivate = $IncludePrivate -and (ConvertTo-LauncherBool (Get-LauncherValue @($LauncherProfile) @('PrivateLock')))
+    $privateCategory = [string](Get-LauncherValue @($LauncherProfile) @('PrivateCategory'))
+    if (-not $privateCategory) { $privateCategory = 'Private' }
+
+    # Each root once, with a flag saying whether everything in it is private.
+    $scanList = New-Object System.Collections.Generic.List[object]
+    foreach ($r in $Roots) { if ($r) { $scanList.Add(@{ Path = $r; Private = $false }) } }
+    if ($allowPrivate) {
+        foreach ($r in $PrivateRoots) { if ($r) { $scanList.Add(@{ Path = $r; Private = $true }) } }
+    }
 
     $tools = New-Object System.Collections.Generic.List[object]
-    foreach ($root in $Roots) {
-        if (-not (Test-Path -LiteralPath $root -PathType Container)) { continue }
+    $seen = @{}
+    foreach ($item in $scanList) {
+        $root = $item.Path
+        if (-not (Test-Path -LiteralPath $root -PathType Container -ErrorAction SilentlyContinue)) { continue }
         foreach ($dir in (Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue)) {
             if ($dir.Name -match '^[_.]' -or $exclude -contains $dir.Name) { continue }
+            if ($seen.ContainsKey($dir.FullName)) { continue }
+            $seen[$dir.FullName] = $true
             $entry = $null
             if ($entries) { $entry = Get-LauncherValue @($entries) @($dir.Name) }
             try {
-                $tool = Get-LauncherTool -ProjectPath $dir.FullName -ProfileEntry $entry
+                $tool = Get-LauncherTool -ProjectPath $dir.FullName -ProfileEntry $entry -PrivateRoot:($item.Private)
             } catch {
                 Write-Verbose "Skipped $($dir.FullName): $($_.Exception.Message)"
                 continue
             }
             if (-not $tool -or $tool.Hidden) { continue }
-            if ($tool.Private -and -not $allowPrivate) { continue }
+            if ($tool.Private) {
+                if (-not $allowPrivate) { continue }
+                if (-not $tool.Category) { $tool.Category = $privateCategory }
+            }
             $tools.Add($tool)
         }
     }
     return $tools.ToArray()
 }
 
+function Resolve-LauncherPath {
+    <# One profile path: %ENV% expanded, relative paths taken from the
+       launcher's own project folder (e.g. ".." = the folder that holds
+       the launcher). #>
+    param([string]$Path, [string]$LauncherHome)
+    if (-not $Path) { return $null }
+    $expanded = [Environment]::ExpandEnvironmentVariables($Path)
+    $full = if ([IO.Path]::IsPathRooted($expanded)) { $expanded } else { Join-Path $LauncherHome $expanded }
+    try { return [IO.Path]::GetFullPath($full) } catch { return $full }
+}
+
 function Resolve-LauncherRoots {
     <# Root folders to scan: the ones saved in settings if they exist,
-       else the profile's Roots, relative to the launcher's own project
-       folder (e.g. ".." = the folder that holds the launcher). #>
-    param([object]$LauncherProfile, [string]$LauncherHome, [object]$Settings)
-    $saved = @(Get-LauncherValue @($Settings) @('Roots')) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) }
-    if ($saved.Count -gt 0) { return @($saved) }
-
-    $roots = foreach ($r in @(Get-LauncherValue @($LauncherProfile) @('Roots'))) {
-        if (-not $r) { continue }
-        $expanded = [Environment]::ExpandEnvironmentVariables([string]$r)
-        $full = if ([IO.Path]::IsPathRooted($expanded)) { $expanded } else { Join-Path $LauncherHome $expanded }
-        try { [IO.Path]::GetFullPath($full) } catch { $full }
+       else the profile's Roots (or another list named by -Key, such as
+       PrivateRoots, which settings never override). #>
+    param([object]$LauncherProfile, [string]$LauncherHome, [object]$Settings, [string]$Key = 'Roots')
+    if ($Key -eq 'Roots') {
+        $saved = @(Get-LauncherValue @($Settings) @('Roots')) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) }
+        if ($saved.Count -gt 0) { return @($saved) }
+    }
+    $roots = foreach ($r in @(Get-LauncherValue @($LauncherProfile) @($Key))) {
+        if ($r) { Resolve-LauncherPath -Path ([string]$r) -LauncherHome $LauncherHome }
     }
     return @($roots)
 }
@@ -462,6 +503,230 @@ function Save-LauncherSettings {
 }
 
 # ===========================================================================
+#  Private-tool lock: password and vault
+# ===========================================================================
+#  The password is a privacy curtain: it only decides whether private tiles
+#  are shown. The real protection is the BitLocker vault (a VHDX mounted at
+#  Home\Private\), which the same password unlocks when the profile has a
+#  Vault. Only a salted PBKDF2-SHA256 hash is kept, in settings.json.
+
+function ConvertFrom-LauncherSecureString {
+    <# The text of a SecureString as UTF-8 bytes. Callers clear the array
+       when done. #>
+    param([Security.SecureString]$Secure)
+    if ($null -eq $Secure) { return [byte[]]@() }
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Secure)
+    try {
+        return [Text.Encoding]::UTF8.GetBytes([Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr))
+    } finally {
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    }
+}
+
+function Get-LauncherPasswordKey {
+    param([Security.SecureString]$Password, [byte[]]$Salt, [int]$Iterations)
+    $bytes = ConvertFrom-LauncherSecureString $Password
+    try {
+        $kdf = New-Object System.Security.Cryptography.Rfc2898DeriveBytes($bytes, $Salt, $Iterations,
+            [System.Security.Cryptography.HashAlgorithmName]::SHA256)
+        try { return $kdf.GetBytes(32) } finally { $kdf.Dispose() }
+    } finally {
+        [Array]::Clear($bytes, 0, $bytes.Length)
+    }
+}
+
+function New-LauncherPasswordHash {
+    <# A new random salt and the PBKDF2-SHA256 hash of the password, ready
+       to save. The password itself is never stored. #>
+    param([Parameter(Mandatory)][Security.SecureString]$Password, [int]$Iterations = 120000)
+    $salt = New-Object byte[] 16
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $rng.GetBytes($salt) } finally { $rng.Dispose() }
+    $key = Get-LauncherPasswordKey -Password $Password -Salt $salt -Iterations $Iterations
+    return [ordered]@{
+        Algorithm  = 'PBKDF2-SHA256'
+        Iterations = $Iterations
+        Salt       = [Convert]::ToBase64String($salt)
+        Hash       = [Convert]::ToBase64String($key)
+    }
+}
+
+function Test-LauncherPassword {
+    <# $true if the password matches the saved hash (constant-time compare). #>
+    param([Security.SecureString]$Password, [object]$Stored)
+    $saltText = [string](Get-LauncherValue @($Stored) @('Salt'))
+    $hashText = [string](Get-LauncherValue @($Stored) @('Hash'))
+    $iter = [int](Get-LauncherValue @($Stored) @('Iterations'))
+    if (-not $Password -or -not $saltText -or -not $hashText -or $iter -lt 1) { return $false }
+    try {
+        $expected = [Convert]::FromBase64String($hashText)
+        $actual = Get-LauncherPasswordKey -Password $Password -Salt ([Convert]::FromBase64String($saltText)) -Iterations $iter
+    } catch { return $false }
+    if ($expected.Length -ne $actual.Length) { return $false }
+    $diff = 0
+    for ($i = 0; $i -lt $expected.Length; $i++) { $diff = $diff -bor ($expected[$i] -bxor $actual[$i]) }
+    return ($diff -eq 0)
+}
+
+function Get-LauncherVault {
+    <# The profile's Vault ({ "Image": "..\\_vault\\Private.vhdx", "MountPath":
+       "..\\Private" }) with full paths, or $null if there is none. #>
+    param([object]$LauncherProfile, [string]$LauncherHome)
+    $v = Get-LauncherValue @($LauncherProfile) @('Vault')
+    if (-not $v) { return $null }
+    $image = Resolve-LauncherPath -Path ([string](Get-LauncherValue @($v) @('Image'))) -LauncherHome $LauncherHome
+    $mount = Resolve-LauncherPath -Path ([string](Get-LauncherValue @($v) @('MountPath'))) -LauncherHome $LauncherHome
+    if (-not $image -or -not $mount) { return $null }
+    return [pscustomobject]@{ Image = $image; MountPath = $mount }
+}
+
+function Test-LauncherVaultOpen {
+    <# $true when the vault's folder can be read, i.e. the VHDX is attached
+       and unlocked. A locked or detached vault leaves an unreadable or
+       empty mount folder. #>
+    param([object]$Vault)
+    if (-not $Vault) { return $false }
+    try {
+        $item = Get-Item -LiteralPath $Vault.MountPath -Force -ErrorAction Stop
+        $null = Get-ChildItem -LiteralPath $Vault.MountPath -Force -ErrorAction Stop | Select-Object -First 1
+        # Mounted volumes show up as a reparse point on the folder.
+        return [bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
+    } catch {
+        return $false
+    }
+}
+
+function Get-LauncherProcessesIn {
+    <# Names of running programs started from inside a folder, so the vault
+       isn't locked under a tool that is still using it. #>
+    param([string]$Folder)
+    if (-not $Folder) { return @() }
+    $prefix = $Folder.TrimEnd('\') + '\'
+    return @(Get-Process -ErrorAction SilentlyContinue |
+             Where-Object { $_.Path -and $_.Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) } |
+             ForEach-Object { $_.ProcessName } | Sort-Object -Unique)
+}
+
+# The script run elevated (UAC) to attach/unlock or lock/detach the vault.
+# Kept as text so a build can paste it into the exe with the engine.
+$script:VaultHelperScript = @'
+param(
+    [ValidateSet('Unlock', 'Lock')][string]$Action,
+    [string]$ImagePath, [string]$MountPath, [string]$SecretFile, [string]$ResultFile
+)
+$ErrorActionPreference = 'Stop'
+function Write-Result([int]$Code, [string]$Text) {
+    [IO.File]::WriteAllText($ResultFile, $Text)
+    exit $Code
+}
+function Get-VaultVolume([object]$Partition, [string]$Mount) {
+    Get-BitLockerVolume -ErrorAction SilentlyContinue |
+        Where-Object { $Partition.AccessPaths -contains $_.MountPoint -or $_.MountPoint -eq $Mount } |
+        Select-Object -First 1
+}
+$attachedHere = $false
+try {
+    Import-Module Storage, BitLocker -ErrorAction Stop
+    $mount = $MountPath.TrimEnd('\') + '\'
+    if ($Action -eq 'Unlock') {
+        $secure = ([IO.File]::ReadAllText($SecretFile)).Trim() | ConvertTo-SecureString
+        Remove-Item -LiteralPath $SecretFile -Force -ErrorAction SilentlyContinue
+        if (-not (Get-DiskImage -ImagePath $ImagePath).Attached) {
+            Mount-DiskImage -ImagePath $ImagePath -StorageType VHDX -NoDriveLetter | Out-Null
+            $attachedHere = $true
+        }
+        $disk = Get-DiskImage -ImagePath $ImagePath | Get-Disk
+        $part = Get-Partition -DiskNumber $disk.Number |
+                Where-Object { $_.Type -ne 'Reserved' -and $_.Size -gt 0 } |
+                Sort-Object Size -Descending | Select-Object -First 1
+        if (-not $part) { throw 'The vault disk has no data partition.' }
+        $volume = Get-VaultVolume $part $mount
+        if ($volume -and $volume.LockStatus -eq 'Locked') {
+            Unlock-BitLocker -MountPoint $volume.MountPoint -Password $secure | Out-Null
+        }
+        if ($part.AccessPaths -notcontains $mount) {
+            if (-not (Test-Path -LiteralPath $mount)) { New-Item -ItemType Directory -Path $mount | Out-Null }
+            Add-PartitionAccessPath -DiskNumber $disk.Number -PartitionNumber $part.PartitionNumber -AccessPath $mount
+        }
+        Write-Result 0 'Unlocked.'
+    } else {
+        $image = Get-DiskImage -ImagePath $ImagePath
+        if ($image.Attached) {
+            try {
+                $disk = $image | Get-Disk
+                $part = Get-Partition -DiskNumber $disk.Number | Sort-Object Size -Descending | Select-Object -First 1
+                $volume = Get-VaultVolume $part $mount
+                if ($volume -and $volume.LockStatus -ne 'Locked') { Lock-BitLocker -MountPoint $volume.MountPoint -ForceDismount | Out-Null }
+            } catch {
+                Write-Verbose "Lock-BitLocker: $($_.Exception.Message)"   # detaching locks it anyway
+            }
+            Dismount-DiskImage -ImagePath $ImagePath | Out-Null
+        }
+        Write-Result 0 'Locked.'
+    }
+} catch {
+    $message = $_.Exception.Message
+    if ($SecretFile -and (Test-Path -LiteralPath $SecretFile)) { Remove-Item -LiteralPath $SecretFile -Force -ErrorAction SilentlyContinue }
+    if ($attachedHere) { try { Dismount-DiskImage -ImagePath $ImagePath | Out-Null } catch { Write-Verbose 'Already detached.' } }
+    Write-Result 1 $message
+}
+'@
+
+function Invoke-LauncherVault {
+    <# Unlocks (attach + BitLocker unlock) or locks (BitLocker lock +
+       detach) the vault through an elevated PowerShell, which shows a UAC
+       prompt. The password goes to it in a DPAPI-encrypted file only this
+       Windows user can read, deleted straight after. Returns
+       @{ Result = 'ok' | 'cancelled' | 'failed'; Message = '...' }. #>
+    param(
+        [Parameter(Mandatory)][ValidateSet('Unlock', 'Lock')][string]$Action,
+        [Parameter(Mandatory)][object]$Vault,
+        [Security.SecureString]$Password,
+        [string]$AppName = 'Launcher'
+    )
+    if (-not (Test-Path -LiteralPath $Vault.Image -PathType Leaf)) {
+        return @{ Result = 'failed'; Message = "The vault file isn't there: $($Vault.Image)" }
+    }
+    $safe = ($AppName -replace '[\\/:*?"<>|]', '').Trim()
+    $work = Join-Path (Join-Path $env:LOCALAPPDATA $safe) 'vault'
+    $id = [guid]::NewGuid().ToString('N')
+    $helper = Join-Path $work 'Vault-Helper.ps1'
+    $secret = Join-Path $work "$id.key"
+    $result = Join-Path $work "$id.txt"
+    try {
+        if (-not (Test-Path -LiteralPath $work)) { New-Item -ItemType Directory -Path $work -Force | Out-Null }
+        [IO.File]::WriteAllText($helper, $script:VaultHelperScript, (New-Object System.Text.UTF8Encoding($true)))
+        $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', "`"$helper`"",
+                     '-Action', $Action, '-ImagePath', "`"$($Vault.Image)`"", '-MountPath', "`"$($Vault.MountPath)`"",
+                     '-ResultFile', "`"$result`"")
+        if ($Action -eq 'Unlock') {
+            if (-not $Password) { return @{ Result = 'failed'; Message = 'No password given for the vault.' } }
+            [IO.File]::WriteAllText($secret, (ConvertFrom-SecureString -SecureString $Password))
+            $argList += @('-SecretFile', "`"$secret`"")
+        }
+        $ps = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        try {
+            $proc = Start-Process -FilePath $ps -ArgumentList $argList -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ErrorAction Stop
+        } catch {
+            $inner = $_.Exception
+            while ($inner.InnerException) { $inner = $inner.InnerException }
+            if ($inner -is [System.ComponentModel.Win32Exception] -and $inner.NativeErrorCode -eq 1223) {
+                return @{ Result = 'cancelled'; Message = 'The administrator prompt was cancelled.' }
+            }
+            return @{ Result = 'failed'; Message = $inner.Message }
+        }
+        $text = if (Test-Path -LiteralPath $result) { ([IO.File]::ReadAllText($result)).Trim() } else { '' }
+        if ($proc.ExitCode -eq 0) { return @{ Result = 'ok'; Message = $text } }
+        if (-not $text) { $text = "The vault helper stopped with code $($proc.ExitCode)." }
+        return @{ Result = 'failed'; Message = $text }
+    } finally {
+        foreach ($f in $secret, $result) {
+            if (Test-Path -LiteralPath $f) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue }
+        }
+    }
+}
+
+# ===========================================================================
 #  Window
 # ===========================================================================
 
@@ -508,6 +773,66 @@ function Format-LauncherDate {
     try {
         return ([datetime]::ParseExact($Date, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)).ToString('d MMM yyyy', [Globalization.CultureInfo]::GetCultureInfo('en-GB'))
     } catch { return $Date }
+}
+
+function Show-LauncherPasswordDialog {
+    <# A small modal password box. With -AskTwice it asks twice (for a new
+       password) and insists on 6+ characters. Returns a SecureString, or
+       $null if cancelled. #>
+    param(
+        [System.Windows.Window]$Owner,
+        [string]$Title,
+        [string]$Prompt,
+        [switch]$AskTwice,
+        [string]$Accent = '#252D63'
+    )
+    $confirmRow = if ($AskTwice) {
+        '<TextBlock Text="Type it again" Margin="0,10,0,4"/><PasswordBox x:Name="Pw2" Padding="6,4"/>'
+    } else { '' }
+    $dlgXaml = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="$([Security.SecurityElement]::Escape($Title))" Width="380" SizeToContent="Height"
+        ResizeMode="NoResize" WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        FontFamily="Segoe UI" FontSize="13" UseLayoutRounding="True">
+  <StackPanel Margin="18,16,18,14">
+    <TextBlock x:Name="PromptText" TextWrapping="Wrap" Margin="0,0,0,8"/>
+    <PasswordBox x:Name="Pw1" Padding="6,4"/>
+    $confirmRow
+    <TextBlock x:Name="ErrorText" Foreground="#B00020" TextWrapping="Wrap" Margin="0,8,0,0" Visibility="Collapsed"/>
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+      <Button x:Name="OkButton" Content="OK" Width="84" Padding="0,4" Margin="0,0,8,0" IsDefault="True"
+              Background="$Accent" Foreground="White" BorderBrush="$Accent"/>
+      <Button x:Name="CancelButton" Content="Cancel" Width="84" Padding="0,4" IsCancel="True"/>
+    </StackPanel>
+  </StackPanel>
+</Window>
+"@
+    $dlg = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader ([xml]$dlgXaml)))
+    if ($Owner) { $dlg.Owner = $Owner; $dlg.Icon = $Owner.Icon }
+    $pw1 = $dlg.FindName('Pw1'); $pw2 = $dlg.FindName('Pw2'); $err = $dlg.FindName('ErrorText')
+    $dlg.FindName('PromptText').Text = $Prompt
+    $out = @{ Value = $null }
+    $dlg.FindName('OkButton').Add_Click({
+        $problem = $null
+        if ($pw1.SecurePassword.Length -eq 0) { $problem = 'Type the password.' }
+        elseif ($AskTwice) {
+            if ($pw1.SecurePassword.Length -lt 6) { $problem = 'Use at least 6 characters.' }
+            else {
+                $a = ConvertFrom-LauncherSecureString $pw1.SecurePassword
+                $b = ConvertFrom-LauncherSecureString $pw2.SecurePassword
+                $same = ([Convert]::ToBase64String($a) -ceq [Convert]::ToBase64String($b))
+                [Array]::Clear($a, 0, $a.Length); [Array]::Clear($b, 0, $b.Length)
+                if (-not $same) { $problem = "The two passwords don't match." }
+            }
+        }
+        if ($problem) { $err.Text = $problem; $err.Visibility = 'Visible'; $pw1.Focus() | Out-Null; return }
+        $out.Value = $pw1.SecurePassword.Copy()
+        $dlg.DialogResult = $true
+    })
+    $dlg.Add_ContentRendered({ $pw1.Focus() | Out-Null })
+    $null = $dlg.ShowDialog()
+    return $out.Value
 }
 
 function Start-Launcher {
@@ -559,6 +884,13 @@ function Start-Launcher {
     $defaultCategory = [string](Get-LauncherValue @($p) @('DefaultCategory'))
     if (-not $defaultCategory) { $defaultCategory = 'Tools' }
     $categoryOrder = @(Get-LauncherValue @($p) @('Categories')) | Where-Object { $_ }
+
+    # Private-tool lock (profile PrivateLock, IdleLockMinutes, PrivateRoots, Vault)
+    $privateLock = ConvertTo-LauncherBool (Get-LauncherValue @($p) @('PrivateLock'))
+    $idleMinutes = 10
+    $idleSetting = Get-LauncherValue @($p) @('IdleLockMinutes')
+    if ($null -ne $idleSetting -and "$idleSetting" -match '^\d+$') { $idleMinutes = [int]$idleSetting }
+    $vault = if ($privateLock) { Get-LauncherVault -LauncherProfile $p -LauncherHome $LauncherHome } else { $null }
 
     $settingsPath = Get-LauncherSettingsPath $AppName
     $settingsObj  = Read-LauncherJson $settingsPath
@@ -669,6 +1001,10 @@ function Start-Launcher {
           <TextBlock x:Name="SubtitleText" Foreground="$accentText" Opacity="0.78" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/>
         </StackPanel>
         <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+          <Button x:Name="PasswordButton" Style="{StaticResource HeaderButton}" Content="Password..." Visibility="Collapsed"
+                  ToolTip="Change the password for private tools"/>
+          <Button x:Name="LockButton" Style="{StaticResource HeaderButton}" Content="Lock" Visibility="Collapsed"
+                  ToolTip="Hide the private tools again (Ctrl+Shift+U)"/>
           <Button x:Name="AboutButton" Style="{StaticResource HeaderButton}" Content="About" ToolTip="Version, licence and keyboard shortcuts"/>
         </StackPanel>
       </Grid>
@@ -713,15 +1049,19 @@ function Start-Launcher {
     $reader = New-Object System.Xml.XmlNodeReader ([xml]$xaml)
     $window = [Windows.Markup.XamlReader]::Load($reader)
     $ui = @{}
-    foreach ($n in 'LogoPlate', 'LogoImage', 'TitleText', 'SubtitleText', 'AboutButton', 'SearchBox', 'SearchHint',
+    foreach ($n in 'LogoPlate', 'LogoImage', 'TitleText', 'SubtitleText', 'PasswordButton', 'LockButton', 'AboutButton', 'SearchBox', 'SearchHint',
                    'FolderButton', 'RefreshButton', 'EmptyText', 'ToolPanel', 'StatusText') {
         $ui[$n] = $window.FindName($n)
     }
 
-    # Taller on big screens (up to 880), never taller than the work area
+    # Full height of the screen (above the taskbar) so every tile fits without
+    # scrolling, 1060 wide, centred left to right.
     $workArea = [System.Windows.SystemParameters]::WorkArea
-    $window.Height = [Math]::Max($window.MinHeight, [Math]::Min(880, $workArea.Height - 40))
+    $window.Height = [Math]::Max($window.MinHeight, $workArea.Height)
     $window.Width  = [Math]::Max($window.MinWidth, [Math]::Min($window.Width, $workArea.Width - 40))
+    $window.WindowStartupLocation = 'Manual'
+    $window.Top  = $workArea.Top
+    $window.Left = $workArea.Left + [Math]::Max(0, ($workArea.Width - $window.Width) / 2)
 
     # Images: embedded first, then the asset folder
     function Get-ProfileImage([string]$Key) {
@@ -747,7 +1087,7 @@ function Start-Launcher {
     $brushWarn      = $bc.ConvertFromString('#A15C00')
 
     # Shared state for the event handlers below
-    $state = @{ Tools = @(); Roots = @(); Shown = @() }
+    $state = @{ Tools = @(); Roots = @(); Shown = @(); Unlocked = $false; VaultOpenedByUs = $false; LastActivity = Get-Date }
 
     # ------------------------------------------------------------ helpers
     $setStatus = {
@@ -985,7 +1325,8 @@ function Start-Launcher {
 
     $scan = {
         $state.Roots = @(Resolve-LauncherRoots -LauncherProfile $p -LauncherHome $LauncherHome -Settings $settings)
-        $state.Tools = @(Get-LauncherTools -LauncherProfile $p -Roots $state.Roots)
+        $privateRoots = @(Resolve-LauncherRoots -LauncherProfile $p -LauncherHome $LauncherHome -Key 'PrivateRoots')
+        $state.Tools = @(Get-LauncherTools -LauncherProfile $p -Roots $state.Roots -PrivateRoots $privateRoots -IncludePrivate:($state.Unlocked))
         $count = $state.Tools.Count
         $toolWord = if ($count -eq 1) { 'tool' } else { 'tools' }
         $sub = if ($subtitle) { "$subtitle  $dot  " } else { '' }
@@ -993,6 +1334,104 @@ function Start-Launcher {
         & $render
         $where = if ($state.Roots.Count) { $state.Roots -join '; ' } else { '(no folder)' }
         & $setStatus ("{0} {1} in {2}  $dot  looked at {3:HH:mm}" -f $count, $toolWord, $where, (Get-Date))
+    }
+
+    # ------------------------------------------------------- private lock
+    $forceRender = {
+        # Let the status bar repaint before a UAC prompt blocks the window.
+        $window.Dispatcher.Invoke([Action]{}, [System.Windows.Threading.DispatcherPriority]::Render)
+    }
+
+    $showUnlocked = {
+        param([bool]$On)
+        $vis = if ($On) { 'Visible' } else { 'Collapsed' }
+        $ui.LockButton.Visibility = $vis
+        $ui.PasswordButton.Visibility = $vis
+    }
+
+    $unlock = {
+        if (-not $privateLock -or $state.Unlocked) { return }
+        $stored = $settings['PrivatePassword']
+        $password = $null
+        if (-not $stored) {
+            $password = Show-LauncherPasswordDialog -Owner $window -Title 'Set a password' -AskTwice -Accent $accent `
+                -Prompt $(if ($vault) { 'Choose the password for private tools. Use the same password as the vault (BitLocker), so one password opens both.' } else { 'Choose the password for private tools.' })
+            if (-not $password) { return }
+            $settings['PrivatePassword'] = New-LauncherPasswordHash -Password $password
+            Save-LauncherSettings -Path $settingsPath -Settings $settings
+        } else {
+            $password = Show-LauncherPasswordDialog -Owner $window -Title 'Unlock' -Prompt 'Password' -Accent $accent
+            if (-not $password) { return }
+            if (-not (Test-LauncherPassword -Password $password -Stored $stored)) {
+                Start-Sleep -Milliseconds 800   # slows down guessing
+                & $setStatus 'Wrong password.'
+                $password.Dispose()
+                return
+            }
+        }
+
+        $vaultNote = ''
+        if ($vault -and (Test-Path -LiteralPath $vault.Image -PathType Leaf) -and -not (Test-LauncherVaultOpen $vault)) {
+            & $setStatus 'Unlocking the vault (accept the administrator prompt)...'
+            & $forceRender
+            $r = Invoke-LauncherVault -Action Unlock -Vault $vault -Password $password -AppName $AppName
+            switch ($r.Result) {
+                'ok'        { $state.VaultOpenedByUs = $true }
+                'cancelled' { $vaultNote = ' The vault is still locked: the administrator prompt was cancelled.' }
+                default     {
+                    $vaultNote = ' The vault is still locked.'
+                    & $showError "Windows couldn't unlock the vault:`n$($r.Message)`n`nThe vault's BitLocker password has to be the same as the launcher password."
+                }
+            }
+        }
+        $password.Dispose()
+        $state.Unlocked = $true
+        $state.LastActivity = Get-Date
+        & $showUnlocked $true
+        & $scan
+        $idleNote = if ($idleMinutes -gt 0) { " They hide again after $idleMinutes minutes idle, or when the launcher closes." } else { ' They hide again when the launcher closes.' }
+        & $setStatus ("Private tools unlocked.$idleNote$vaultNote")
+    }
+
+    $lock = {
+        param([string]$Reason = 'manual')
+        if (-not $state.Unlocked -and -not $state.VaultOpenedByUs) { return }
+        $state.Unlocked = $false
+        & $showUnlocked $false
+        $note = 'Private tools hidden.'
+        if ($vault -and (Test-LauncherVaultOpen $vault)) {
+            $running = @(Get-LauncherProcessesIn $vault.MountPath)
+            $doLock = $true
+            if ($running.Count -gt 0) {
+                if ($Reason -eq 'idle') {
+                    $doLock = $false
+                } else {
+                    $answer = [System.Windows.MessageBox]::Show($window,
+                        "$($running -join ', ') is still running from the vault.`n`nLock the vault anyway? Yes locks it (close the tool first if you can). No leaves the vault unlocked.",
+                        $AppName, 'YesNo', 'Warning')
+                    $doLock = ($answer -eq 'Yes')
+                }
+            }
+            if ($doLock) {
+                & $setStatus 'Locking the vault (accept the administrator prompt)...'
+                & $forceRender
+                $r = Invoke-LauncherVault -Action Lock -Vault $vault -AppName $AppName
+                switch ($r.Result) {
+                    'ok'        { $state.VaultOpenedByUs = $false; $note = 'Private tools hidden and the vault locked.' }
+                    'cancelled' { $note = 'Private tools hidden, but the vault is still unlocked: the administrator prompt was cancelled.' }
+                    default     { $note = "Private tools hidden, but the vault didn't lock: $($r.Message)" }
+                }
+            } else {
+                $note = "Private tools hidden. The vault stays unlocked while $($running -join ', ') runs from it."
+            }
+        } else {
+            $state.VaultOpenedByUs = $false
+        }
+        if ($Reason -ne 'closing') {
+            & $scan
+            if ($Reason -eq 'idle') { $note = "$note (idle for $idleMinutes minutes)" }
+            & $setStatus $note
+        }
     }
 
     # ------------------------------------------------------------ events
@@ -1022,6 +1461,21 @@ function Start-Launcher {
             & $scan
         }
     })
+    $ui.LockButton.Add_Click({ & $lock 'manual' })
+    $ui.PasswordButton.Add_Click({
+        $current = Show-LauncherPasswordDialog -Owner $window -Title 'Change password' -Prompt 'Current password' -Accent $accent
+        if (-not $current) { return }
+        $ok = Test-LauncherPassword -Password $current -Stored $settings['PrivatePassword']
+        $current.Dispose()
+        if (-not $ok) { & $setStatus 'Wrong password: nothing changed.'; return }
+        $new = Show-LauncherPasswordDialog -Owner $window -Title 'Change password' -AskTwice -Accent $accent `
+            -Prompt $(if ($vault) { 'New password. Change the vault''s BitLocker password to match, so one password still opens both.' } else { 'New password' })
+        if (-not $new) { return }
+        $settings['PrivatePassword'] = New-LauncherPasswordHash -Password $new
+        $new.Dispose()
+        Save-LauncherSettings -Path $settingsPath -Settings $settings
+        & $setStatus 'Password changed.'
+    })
     $ui.AboutButton.Add_Click({
         $lines = @(
             "$AppName v$AppVersion$(if ($AppDate) { " ($AppDate)" })",
@@ -1035,15 +1489,42 @@ function Start-Launcher {
             'Shortcuts: Ctrl+F search, Enter start the only match, Esc clear, F5 refresh.',
             "Settings: $settingsPath"
         )
+        if ($state.Unlocked) { $lines += @('', 'Private tools are unlocked. Ctrl+Shift+U or Lock hides them again.') }
         [System.Windows.MessageBox]::Show($window, ($lines -join "`n"), "About $AppName", 'OK', 'Information') | Out-Null
     })
     $window.Add_PreviewKeyDown({
         $e = $args[1]
         $ctrl = ([System.Windows.Input.Keyboard]::Modifiers -band [System.Windows.Input.ModifierKeys]::Control) -ne 0
+        $shift = ([System.Windows.Input.Keyboard]::Modifiers -band [System.Windows.Input.ModifierKeys]::Shift) -ne 0
         if ($e.Key -eq 'F5') { & $scan; $e.Handled = $true }
+        elseif ($privateLock -and $ctrl -and $shift -and $e.Key -eq 'U') {
+            if ($state.Unlocked) { & $lock 'manual' } else { & $unlock }
+            $e.Handled = $true
+        }
         elseif ($ctrl -and $e.Key -eq 'F') { $ui.SearchBox.Focus() | Out-Null; $ui.SearchBox.SelectAll(); $e.Handled = $true }
     })
     $window.Add_ContentRendered({ $ui.SearchBox.Focus() | Out-Null })
+
+    if ($privateLock) {
+        # Anything the person does in the window counts as activity.
+        $window.Add_PreviewMouseMove({ $state.LastActivity = Get-Date })
+        $window.Add_PreviewMouseDown({ $state.LastActivity = Get-Date })
+        $window.Add_PreviewKeyDown({ $state.LastActivity = Get-Date })
+        if ($idleMinutes -gt 0) {
+            $idleTimer = New-Object System.Windows.Threading.DispatcherTimer
+            $idleTimer.Interval = [TimeSpan]::FromSeconds(30)
+            $idleTimer.Add_Tick({
+                if ($state.Unlocked -and ((Get-Date) - $state.LastActivity).TotalMinutes -ge $idleMinutes) {
+                    & $lock 'idle'
+                }
+            })
+            $idleTimer.Start()
+        }
+        # Closing re-locks: hides the tiles and locks the vault if it was opened.
+        $window.Add_Closing({
+            if ($state.Unlocked -or $state.VaultOpenedByUs) { & $lock 'closing' }
+        })
+    }
 
     & $scan
     $window.ShowDialog() | Out-Null

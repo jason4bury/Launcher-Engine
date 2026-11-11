@@ -6,10 +6,35 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.01] - 2026-11-11
+Ready for the Home Launcher.
+
+### Added
+- **Private-tool lock.** With the profile's `PrivateLock` on, Ctrl+Shift+U asks for the
+  launcher password (set on first use) and shows the private tools; **Lock**, the same
+  keys, `IdleLockMinutes` without use (default 10) or closing the window hides them
+  again. **Password...** changes it. Only a salted PBKDF2-SHA256 hash is kept, in
+  `settings.json`. While locked nothing hints that private tools exist.
+- `PrivateRoots` in the profile (e.g. `..\Private`): every tool found there is private,
+  so new private tools need no flag. They are only scanned once unlocked.
+- `PrivateCategory` (default "Private"): the group private tools go in unless they have
+  their own category.
+- **Vault**: with `Vault.Image` and `Vault.MountPath` in the profile, unlocking also
+  attaches the BitLocker VHDX and unlocks it with the same password, and locking locks
+  and detaches it. Both run in an elevated PowerShell (UAC prompt). The vault is left
+  unlocked, with a message, while a tool is still running from it.
+- Icon fallback: `Source\assets\<Folder>.png` (or `.ico`) when no icon is named, so
+  the Docker apps get their own icons.
+
 ### Changed
 - Home only: the README example, comments and notes now use the Home Launcher
-  (`profile.home.json`, `E:\Created\Home\Home-Launcher`).
-  README headings now use the Home house-style emoji.
+  (`profile.home.json`, `E:\Created\Home\Home-Launcher`). README headings use the
+  Home house-style emoji.
+- `"Private": true` is now also read from a tool's `build.json`.
+- The window opens the full height of the screen (above the taskbar), 1060 wide and
+  centred, so all the tiles show without scrolling. It was capped at 880 high.
+- `Resolve-LauncherRoots` takes `-Key` to resolve other path lists, and the new
+  `Resolve-LauncherPath` resolves a single profile path.
 
 ## [1.00] - 2026-11-10
 First release.
