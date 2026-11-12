@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.02] - 2026-11-12
+
+### Added
+- **Exit** button in the header, next to **About**. It closes the launcher the same way
+  as the window's X, so private tools and the vault are still locked on the way out.
+
 ## [1.01] - 2026-11-11
 Ready for the Home Launcher.
 

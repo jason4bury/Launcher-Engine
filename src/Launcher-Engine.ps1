@@ -36,8 +36,8 @@
 #Requires -Version 5.1
 
 $script:EngineName    = 'Launcher Engine'
-$script:EngineVersion = '1.01'
-$script:EngineDate    = '2026-11-11'
+$script:EngineVersion = '1.02'
+$script:EngineDate    = '2026-11-12'
 
 # ===========================================================================
 #  Small helpers
@@ -1006,6 +1006,7 @@ function Start-Launcher {
           <Button x:Name="LockButton" Style="{StaticResource HeaderButton}" Content="Lock" Visibility="Collapsed"
                   ToolTip="Hide the private tools again (Ctrl+Shift+U)"/>
           <Button x:Name="AboutButton" Style="{StaticResource HeaderButton}" Content="About" ToolTip="Version, licence and keyboard shortcuts"/>
+          <Button x:Name="ExitButton" Style="{StaticResource HeaderButton}" Content="Exit" ToolTip="Close the launcher (Alt+F4)"/>
         </StackPanel>
       </Grid>
     </Border>
@@ -1049,7 +1050,7 @@ function Start-Launcher {
     $reader = New-Object System.Xml.XmlNodeReader ([xml]$xaml)
     $window = [Windows.Markup.XamlReader]::Load($reader)
     $ui = @{}
-    foreach ($n in 'LogoPlate', 'LogoImage', 'TitleText', 'SubtitleText', 'PasswordButton', 'LockButton', 'AboutButton', 'SearchBox', 'SearchHint',
+    foreach ($n in 'LogoPlate', 'LogoImage', 'TitleText', 'SubtitleText', 'PasswordButton', 'LockButton', 'AboutButton', 'ExitButton', 'SearchBox', 'SearchHint',
                    'FolderButton', 'RefreshButton', 'EmptyText', 'ToolPanel', 'StatusText') {
         $ui[$n] = $window.FindName($n)
     }
@@ -1492,6 +1493,9 @@ function Start-Launcher {
         if ($state.Unlocked) { $lines += @('', 'Private tools are unlocked. Ctrl+Shift+U or Lock hides them again.') }
         [System.Windows.MessageBox]::Show($window, ($lines -join "`n"), "About $AppName", 'OK', 'Information') | Out-Null
     })
+    # Exit closes the window the same way as the title bar's X, so the Closing
+    # handler still re-locks private tools and the vault.
+    $ui.ExitButton.Add_Click({ $window.Close() })
     $window.Add_PreviewKeyDown({
         $e = $args[1]
         $ctrl = ([System.Windows.Input.Keyboard]::Modifiers -band [System.Windows.Input.ModifierKeys]::Control) -ne 0

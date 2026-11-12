@@ -6,7 +6,7 @@
 
 The shared code behind the Home Launcher: finds tools from the folder layout and shows them as tiles you can search and start.
 
-![Version](https://img.shields.io/badge/version-v1.01-blue) ![Platform](https://img.shields.io/badge/platform-Windows-0078D6) ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207-5391FE) ![Licence](https://img.shields.io/badge/licence-MIT-green)
+![Version](https://img.shields.io/badge/version-v1.02-blue) ![Platform](https://img.shields.io/badge/platform-Windows-0078D6) ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207-5391FE) ![Licence](https://img.shields.io/badge/licence-MIT-green)
 
 ## ✨ Features
 
@@ -27,7 +27,7 @@ One PowerShell/WPF codebase, so a fix or feature lands in every launcher at once
 
 - Falls back to the main script in `Source\src\` (`build.json`'s `EntryScript`, or `<Folder>.ps1` / `.py` / `.html`) when there's no build.
 - Starts exes, PowerShell and Python scripts, batch files, web pages and web-app URLs, with **Run as admin**.
-- The window: tiles grouped by category, search, quick links (folder, help, GitHub), status bar, About box, keyboard shortcuts, and colours, logo and titles from the profile.
+- The window: tiles grouped by category, search, quick links (folder, help, GitHub), status bar, About and Exit buttons, keyboard shortcuts, and colours, logo and titles from the profile.
 - **Private-tool lock**: private tools (anything under the profile's `PrivateRoots`, or flagged `"Private": true`) stay completely hidden until Ctrl+Shift+U and the launcher password. **Lock**, the same keys, idle time or closing the window hides them again. Only a salted PBKDF2-SHA256 hash of the password is kept.
 - **Vault**: if the profile names a BitLocker VHDX, unlocking also attaches and unlocks it with the same password (UAC prompt), and locking locks and detaches it, unless a tool is still running from it.
 
