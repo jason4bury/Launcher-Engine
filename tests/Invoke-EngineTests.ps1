@@ -167,6 +167,23 @@ try {
     Assert-Equal (Split-Path -Leaf $td.IconPath) 'Delta-Web.png' 'icon found as assets\<Folder>.png'
     Assert-Equal $td.Warning '' 'no missing-build warning for a web app'
 
+    Write-Host 'Epsilon (script release + shortcut, no exe)'
+    # Build.cmd's layout for a tool without an exe: versioned release folders and
+    # Builds\<App Name>.lnk. An old exe left beside them must not win.
+    $e = Join-Path $root 'Solo\Epsilon-Tool'
+    New-TestFile (Join-Path $e 'Source\build.json') '{ "AppName": "Epsilon Tool", "RequireAdmin": true }'
+    New-TestFile (Join-Path $e 'Source\CHANGELOG.md') "## [1.02] - 2026-11-15`n"
+    New-TestFile (Join-Path $e 'Builds\Epsilon Tool v1.01.exe') 'x'
+    New-TestFile (Join-Path $e 'Builds\Epsilon Tool v1.02\Epsilon-Tool.ps1') '# x'
+    New-TestFile (Join-Path $e 'Builds\Epsilon Tool v1.10\Epsilon-Tool.ps1') '# x'
+    New-TestFile (Join-Path $e 'Builds\Epsilon Tool.lnk') 'x'
+    $te = Get-LauncherTool -ProjectPath $e
+    Assert-Equal (Split-Path -Leaf $te.Target) 'Epsilon Tool.lnk' 'Builds\<App Name>.lnk beats an old exe'
+    Assert-Equal $te.Mode 'shortcut' 'run mode'
+    Assert-Equal $te.BuildVersion '1.10' 'build version from the newest release folder (1.10 beats 1.02)'
+    Assert-Equal $te.RequireAdmin $true 'RequireAdmin from build.json'
+    Assert-Equal (Get-LauncherRunMode 'C:\x\Thing.lnk') 'shortcut' '.lnk is a shortcut'
+
     Write-Host 'Password'
     $pw = New-TestSecureString 'correct horse'
     $stored = (New-LauncherPasswordHash -Password $pw) | ConvertTo-Json | ConvertFrom-Json

@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.03] - 2026-11-15
+
+### Added
+- **Script tools with no exe.** A tool whose `Build.cmd` makes `<App Name> v<x.yy>\` release
+  folders and a `Builds\<App Name>.lnk` shortcut (as Homelab does) is found without a
+  `Target` in `launcher.json`. The shortcut wins over any old exe left in `Builds\`, and the
+  tile's build version comes from the newest release folder.
+- `.lnk` targets start as shortcuts: **Run as admin** works on them, and `RequireAdmin`
+  tools show "needs admin".
+
+### Changed
+- The missing-build note says "No build in Builds\" instead of "No exe in Builds\".
 ## [1.02] - 2026-11-12
 
 ### Added

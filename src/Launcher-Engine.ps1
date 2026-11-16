@@ -36,8 +36,8 @@
 #Requires -Version 5.1
 
 $script:EngineName    = 'Launcher Engine'
-$script:EngineVersion = '1.02'
-$script:EngineDate    = '2026-11-12'
+$script:EngineVersion = '1.03'
+$script:EngineDate    = '2026-11-15'
 
 # ===========================================================================
 #  Small helpers
@@ -162,6 +162,7 @@ function Get-LauncherRunMode {
     param([string]$Path)
     switch -Regex ([IO.Path]::GetExtension($Path).ToLowerInvariant()) {
         '^\.exe$'        { return 'exe' }
+        '^\.lnk$'        { return 'shortcut' }
         '^\.ps1$'        { return 'powershell' }
         '^\.pyw?$'       { return 'python' }
         '^\.(cmd|bat)$'  { return 'cmd' }
@@ -189,6 +190,23 @@ function Find-NewestBuild {
     if ($pick.Count -eq 0) { $pick = @($scored | Where-Object { $_.Version } | Sort-Object Version -Descending) }
     if ($pick.Count -eq 0) { $pick = @($scored | Sort-Object { $_.File.LastWriteTime } -Descending) }
     return $pick[0].File.FullName
+}
+
+function Find-ReleaseShortcut {
+    <# A script tool with no exe: Build.cmd makes "<AppName> v<x.yy>\" release
+       folders in Builds\ and points Builds\<AppName>.lnk at the newest one.
+       Returns @{ Path; Version } or $null. #>
+    param([string]$BuildsPath, [string]$AppName)
+    if (-not $AppName -or -not (Test-Path -LiteralPath $BuildsPath -PathType Container)) { return $null }
+    $lnk = Join-Path $BuildsPath "$AppName.lnk"
+    if (-not (Test-Path -LiteralPath $lnk -PathType Leaf)) { return $null }
+    $versions = foreach ($d in @(Get-ChildItem -LiteralPath $BuildsPath -Directory -ErrorAction SilentlyContinue)) {
+        if ($d.Name -like "$AppName v*" -and $d.Name -match '\sv(\d+\.\d+)$') {
+            [pscustomobject]@{ Text = $Matches[1]; Version = ConvertTo-LauncherVersion $Matches[1] }
+        }
+    }
+    $newest = @($versions | Where-Object { $_.Version } | Sort-Object Version -Descending) | Select-Object -First 1
+    return @{ Path = $lnk; Version = $(if ($newest) { $newest.Text } else { $null }) }
 }
 
 # ===========================================================================
@@ -262,6 +280,12 @@ function Get-LauncherTool {
             if (Test-Path -LiteralPath $candidate) { $tool.Target = (Resolve-Path -LiteralPath $candidate).ProviderPath }
             else { $tool.Warning = "Target not found: $target" }
         }
+        if (-not $tool.Target -and -not $tool.Warning -and -not $runMode -and $type -notmatch '^html?$') {
+            # Script release with a shortcut (no exe) - checked before exes, so an old
+            # exe left in Builds\ doesn't win over the newer script release.
+            $release = Find-ReleaseShortcut -BuildsPath $buildsPath -AppName $tool.Name
+            if ($release) { $tool.Target = $release.Path; $tool.BuildVersion = $release.Version }
+        }
         if (-not $tool.Target -and -not $tool.Warning) {
             $ext = if ($type -match '^html?$') { '.html' } elseif ($runMode -eq 'python') { '.py' } else { '.exe' }
             $tool.Target = Find-NewestBuild -BuildsPath $buildsPath -AppName $tool.Name -Extension $ext
@@ -274,13 +298,13 @@ function Get-LauncherTool {
             foreach ($e in '.ps1', '.py', '.html') { $candidates += (Join-Path $sourcePath "src\$folder$e") }
             $tool.Target = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
             if (-not $tool.Target) {
-                $tool.Warning = 'No exe in Builds\ and no main script in Source\src\.'
+                $tool.Warning = 'No build in Builds\ and no main script in Source\src\.'
             }
         }
         if ($tool.Target) {
             $tool.Mode = if ($runMode -and $runMode -ne 'exe') { $runMode } else { Get-LauncherRunMode $tool.Target }
             $base = [IO.Path]::GetFileNameWithoutExtension($tool.Target)
-            if ($base -match '\sv?(\d+\.\d+)$') { $tool.BuildVersion = $Matches[1] }
+            if (-not $tool.BuildVersion -and $base -match '\sv?(\d+\.\d+)$') { $tool.BuildVersion = $Matches[1] }
         }
     }
     if (-not $tool.Version -and $tool.BuildVersion) { $tool.Version = $tool.BuildVersion }
@@ -431,6 +455,7 @@ function Invoke-LauncherTool {
 
     switch ($Tool.Mode) {
         'exe'        { $start.FilePath = $Tool.Target }
+        'shortcut'   { $start.FilePath = $Tool.Target }   # the .lnk holds its own folder and arguments
         'cmd'        { $start.FilePath = $Tool.Target }
         'powershell' {
             $start.FilePath = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
@@ -449,7 +474,7 @@ function Invoke-LauncherTool {
             $start.FilePath = $Tool.Target
         }
     }
-    if ($workDir -and $Tool.Mode -ne 'html' -and $Tool.Mode -ne 'file') { $start.WorkingDirectory = $workDir }
+    if ($workDir -and @('html', 'file', 'shortcut') -notcontains $Tool.Mode) { $start.WorkingDirectory = $workDir }
     if ($elevate) { $start.Verb = 'RunAs' }
 
     try {
@@ -1200,6 +1225,7 @@ function Start-Launcher {
         if ($niceDate) { $metaParts += $niceDate }
         switch ($Tool.Mode) {
             'exe'        { if ($Tool.RequireAdmin) { $metaParts += 'needs admin' } }
+            'shortcut'   { if ($Tool.RequireAdmin) { $metaParts += 'needs admin' } }
             'html'       { $metaParts += 'web page' }
             'url'        { $metaParts += 'web app' }
             'powershell' { $metaParts += 'script' }
@@ -1231,7 +1257,7 @@ function Start-Launcher {
 
         # Notes: missing build, or the build is older than the CHANGELOG
         $note = $Tool.Warning
-        if (-not $note -and $Tool.Mode -ne 'exe' -and $Tool.Mode -ne 'html' -and $Tool.Mode -ne 'url' -and $Tool.Target -like "$($Tool.SourcePath)*") {
+        if (-not $note -and @('exe', 'shortcut') -notcontains $Tool.Mode -and $Tool.Mode -ne 'html' -and $Tool.Mode -ne 'url' -and $Tool.Target -like "$($Tool.SourcePath)*") {
             $note = 'No build in Builds\ yet: runs the script from Source\.'
         }
         if (-not $note -and $Tool.BuildVersion -and $Tool.Version -and $Tool.BuildVersion -ne $Tool.Version) {
@@ -1254,7 +1280,7 @@ function Start-Launcher {
             $buttons = New-Object System.Windows.Controls.WrapPanel
             $openText = if ($Tool.RequireAdmin) { 'Open as admin' } else { 'Open' }
             $buttons.Children.Add((& $newButton $openText 'PrimaryButton' "Start $($Tool.Name)" @{ Tool = $Tool; Action = 'Open' })) | Out-Null
-            if (-not $Tool.RequireAdmin -and @('exe', 'powershell', 'cmd', 'python') -contains $Tool.Mode) {
+            if (-not $Tool.RequireAdmin -and @('exe', 'shortcut', 'powershell', 'cmd', 'python') -contains $Tool.Mode) {
                 $buttons.Children.Add((& $newButton 'Run as admin' 'QuietButton' 'Start it as administrator (UAC prompt)' @{ Tool = $Tool; Action = 'Admin' })) | Out-Null
             }
             $stack.Children.Add($buttons) | Out-Null
