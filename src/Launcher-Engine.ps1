@@ -36,8 +36,8 @@
 #Requires -Version 5.1
 
 $script:EngineName    = 'Launcher Engine'
-$script:EngineVersion = '1.03'
-$script:EngineDate    = '2026-11-15'
+$script:EngineVersion = '1.04'
+$script:EngineDate    = '2026-11-16'
 
 # ===========================================================================
 #  Small helpers
@@ -803,13 +803,16 @@ function Format-LauncherDate {
 function Show-LauncherPasswordDialog {
     <# A small modal password box. With -AskTwice it asks twice (for a new
        password) and insists on 6+ characters. Returns a SecureString, or
-       $null if cancelled. #>
+       $null if cancelled. OK and Cancel use the launcher's own rounded
+       button look (accent and quiet), with hover, pressed and focus states;
+       Enter is OK and Esc is Cancel. #>
     param(
         [System.Windows.Window]$Owner,
         [string]$Title,
         [string]$Prompt,
         [switch]$AskTwice,
-        [string]$Accent = '#252D63'
+        [string]$Accent = '#252D63',
+        [string]$AccentText = '#FFFFFF'
     )
     $confirmRow = if ($AskTwice) {
         '<TextBlock Text="Type it again" Margin="0,10,0,4"/><PasswordBox x:Name="Pw2" Padding="6,4"/>'
@@ -820,15 +823,66 @@ function Show-LauncherPasswordDialog {
         Title="$([Security.SecurityElement]::Escape($Title))" Width="380" SizeToContent="Height"
         ResizeMode="NoResize" WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         FontFamily="Segoe UI" FontSize="13" UseLayoutRounding="True">
+  <Window.Resources>
+    <Style x:Key="DialogButton" TargetType="Button">
+      <Setter Property="MinWidth" Value="92"/>
+      <Setter Property="Height" Value="32"/>
+      <Setter Property="Padding" Value="16,0"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+    </Style>
+    <Style x:Key="DialogOk" TargetType="Button" BasedOn="{StaticResource DialogButton}">
+      <Setter Property="Foreground" Value="$AccentText"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd" Background="$Accent" BorderBrush="$Accent" BorderThickness="1" CornerRadius="4">
+              <Grid>
+                <Border x:Name="Shade" Background="#000000" Opacity="0" CornerRadius="3"/>
+                <Border x:Name="Ring" BorderBrush="#99FFFFFF" BorderThickness="1" CornerRadius="3" Margin="1" Visibility="Collapsed"/>
+                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
+              </Grid>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Shade" Property="Opacity" Value="0.12"/></Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Ring" Property="Visibility" Value="Visible"/></Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="Shade" Property="Opacity" Value="0.25"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Bd" Property="Opacity" Value="0.4"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="DialogCancel" TargetType="Button" BasedOn="{StaticResource DialogButton}">
+      <Setter Property="Foreground" Value="#333A4D"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd" Background="#FFFFFF" BorderBrush="#C9CDD8" BorderThickness="1" CornerRadius="4">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#EEF0F6"/>
+                <Setter TargetName="Bd" Property="BorderBrush" Value="$Accent"/>
+              </Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="$Accent"/></Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bd" Property="Background" Value="#E2E5EF"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Window.Resources>
   <StackPanel Margin="18,16,18,14">
     <TextBlock x:Name="PromptText" TextWrapping="Wrap" Margin="0,0,0,8"/>
     <PasswordBox x:Name="Pw1" Padding="6,4"/>
     $confirmRow
     <TextBlock x:Name="ErrorText" Foreground="#B00020" TextWrapping="Wrap" Margin="0,8,0,0" Visibility="Collapsed"/>
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
-      <Button x:Name="OkButton" Content="OK" Width="84" Padding="0,4" Margin="0,0,8,0" IsDefault="True"
-              Background="$Accent" Foreground="White" BorderBrush="$Accent"/>
-      <Button x:Name="CancelButton" Content="Cancel" Width="84" Padding="0,4" IsCancel="True"/>
+      <Button x:Name="OkButton" Style="{StaticResource DialogOk}" Content="OK" Margin="0,0,8,0" IsDefault="True"/>
+      <Button x:Name="CancelButton" Style="{StaticResource DialogCancel}" Content="Cancel" IsCancel="True"/>
     </StackPanel>
   </StackPanel>
 </Window>
@@ -1381,13 +1435,13 @@ function Start-Launcher {
         $stored = $settings['PrivatePassword']
         $password = $null
         if (-not $stored) {
-            $password = Show-LauncherPasswordDialog -Owner $window -Title 'Set a password' -AskTwice -Accent $accent `
+            $password = Show-LauncherPasswordDialog -Owner $window -Title 'Set a password' -AskTwice -Accent $accent -AccentText $accentText `
                 -Prompt $(if ($vault) { 'Choose the password for private tools. Use the same password as the vault (BitLocker), so one password opens both.' } else { 'Choose the password for private tools.' })
             if (-not $password) { return }
             $settings['PrivatePassword'] = New-LauncherPasswordHash -Password $password
             Save-LauncherSettings -Path $settingsPath -Settings $settings
         } else {
-            $password = Show-LauncherPasswordDialog -Owner $window -Title 'Unlock' -Prompt 'Password' -Accent $accent
+            $password = Show-LauncherPasswordDialog -Owner $window -Title 'Unlock' -Prompt 'Password' -Accent $accent -AccentText $accentText
             if (-not $password) { return }
             if (-not (Test-LauncherPassword -Password $password -Stored $stored)) {
                 Start-Sleep -Milliseconds 800   # slows down guessing
@@ -1490,12 +1544,12 @@ function Start-Launcher {
     })
     $ui.LockButton.Add_Click({ & $lock 'manual' })
     $ui.PasswordButton.Add_Click({
-        $current = Show-LauncherPasswordDialog -Owner $window -Title 'Change password' -Prompt 'Current password' -Accent $accent
+        $current = Show-LauncherPasswordDialog -Owner $window -Title 'Change password' -Prompt 'Current password' -Accent $accent -AccentText $accentText
         if (-not $current) { return }
         $ok = Test-LauncherPassword -Password $current -Stored $settings['PrivatePassword']
         $current.Dispose()
         if (-not $ok) { & $setStatus 'Wrong password: nothing changed.'; return }
-        $new = Show-LauncherPasswordDialog -Owner $window -Title 'Change password' -AskTwice -Accent $accent `
+        $new = Show-LauncherPasswordDialog -Owner $window -Title 'Change password' -AskTwice -Accent $accent -AccentText $accentText `
             -Prompt $(if ($vault) { 'New password. Change the vault''s BitLocker password to match, so one password still opens both.' } else { 'New password' })
         if (-not $new) { return }
         $settings['PrivatePassword'] = New-LauncherPasswordHash -Password $new

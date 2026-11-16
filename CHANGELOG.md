@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.04] - 2026-11-16
+
+### Changed
+- **Nicer password dialog buttons.** The Unlock, Set a password and Change password
+  dialogs' **OK** and **Cancel** buttons now use the launcher's own button look: rounded
+  corners, a little taller and wider, OK in the accent colour with semibold text, Cancel as
+  a quiet white button. Both darken or highlight on hover, press in when clicked and show
+  a clear focus outline when tabbed to. Enter is still OK and Esc Cancel.
+- `Show-LauncherPasswordDialog` takes `-AccentText` (default white) so OK's text follows
+  the profile's `Theme.AccentText`.
+
 ## [1.03] - 2026-11-15
 
 ### Added
