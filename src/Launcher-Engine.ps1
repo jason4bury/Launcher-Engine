@@ -36,7 +36,7 @@
 #Requires -Version 5.1
 
 $script:EngineName    = 'Launcher Engine'
-$script:EngineVersion = '1.07'
+$script:EngineVersion = '1.08'
 $script:EngineDate    = '2026-11-16'
 
 # ===========================================================================
@@ -1304,10 +1304,46 @@ $(Get-LauncherScrollStyle)
           <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
         <Grid Grid.Column="0">
-          <TextBox x:Name="SearchBox" Padding="8,6" VerticalContentAlignment="Center" BorderBrush="#C9CDD8" Background="#FFFFFF" Foreground="#1F2430" CaretBrush="#1F2430"
-                   ToolTip="Search by name, description or category (Ctrl+F). Enter starts the only match; Esc clears."/>
-          <TextBlock x:Name="SearchHint" Text="Search tools" Foreground="#8A90A2" Margin="11,0,0,0"
+          <!-- Rounded search box: magnifier on the left, a clear button on the right, a blue ring while typing. -->
+          <TextBox x:Name="SearchBox" Height="36" VerticalContentAlignment="Center" Foreground="#1F2430" CaretBrush="#1F2430"
+                   ToolTip="Search by name, description or category (Ctrl+F). Enter starts the only match; Esc clears.">
+            <TextBox.Template>
+              <ControlTemplate TargetType="TextBox">
+                <Border x:Name="Bd" CornerRadius="18" BorderThickness="1" BorderBrush="#C9CDD8" Background="#FFFFFF" Padding="38,0,36,0">
+                  <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center" Focusable="False"/>
+                </Border>
+                <ControlTemplate.Triggers>
+                  <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="Bd" Property="BorderBrush" Value="#8A90A2"/>
+                  </Trigger>
+                  <Trigger Property="IsKeyboardFocused" Value="True">
+                    <Setter TargetName="Bd" Property="BorderBrush" Value="#2F80ED"/>
+                    <Setter TargetName="Bd" Property="BorderThickness" Value="2"/>
+                    <Setter TargetName="Bd" Property="Padding" Value="37,0,35,0"/>
+                  </Trigger>
+                </ControlTemplate.Triggers>
+              </ControlTemplate>
+            </TextBox.Template>
+          </TextBox>
+          <TextBlock Text="&#xE721;" FontFamily="Segoe MDL2 Assets" FontSize="14" Foreground="#8A90A2" Margin="15,0,0,0"
+                     VerticalAlignment="Center" HorizontalAlignment="Left" IsHitTestVisible="False"/>
+          <TextBlock x:Name="SearchHint" Text="Search tools" Foreground="#8A90A2" Margin="40,0,0,0"
                      VerticalAlignment="Center" IsHitTestVisible="False"/>
+          <Button x:Name="SearchClear" Width="26" Height="26" Margin="0,0,6,0" HorizontalAlignment="Right" VerticalAlignment="Center"
+                  Visibility="Collapsed" Cursor="Hand" Focusable="False" ToolTip="Clear the search (Esc)">
+            <Button.Template>
+              <ControlTemplate TargetType="Button">
+                <Border x:Name="Cb" CornerRadius="13" Background="Transparent">
+                  <TextBlock Text="&#xE711;" FontFamily="Segoe MDL2 Assets" FontSize="10" Foreground="#5A6072" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <ControlTemplate.Triggers>
+                  <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="Cb" Property="Background" Value="#E2E5EF"/>
+                  </Trigger>
+                </ControlTemplate.Triggers>
+              </ControlTemplate>
+            </Button.Template>
+          </Button>
         </Grid>
         <StackPanel Grid.Column="2" Orientation="Horizontal">
           <Button x:Name="FolderButton" Style="{StaticResource QuietButton}" Margin="8,0,0,0" Content="Tools folder..."
@@ -1336,7 +1372,7 @@ $(Get-LauncherScrollStyle)
     $window = [Windows.Markup.XamlReader]::Load($reader)
     $window.Add_SourceInitialized({ Set-LauncherTitleBar $this })
     $ui = @{}
-    foreach ($n in 'LogoPlate', 'LogoImage', 'TitleText', 'SubtitleText', 'PasswordButton', 'LockButton', 'LookButton', 'HelpButton', 'AboutButton', 'ExitButton', 'SearchBox', 'SearchHint',
+    foreach ($n in 'LogoPlate', 'LogoImage', 'TitleText', 'SubtitleText', 'PasswordButton', 'LockButton', 'LookButton', 'HelpButton', 'AboutButton', 'ExitButton', 'SearchBox', 'SearchHint', 'SearchClear',
                    'FolderButton', 'RefreshButton', 'EmptyText', 'ToolPanel', 'StatusText') {
         $ui[$n] = $window.FindName($n)
     }
@@ -1733,8 +1769,10 @@ $(Get-LauncherScrollStyle)
     # ------------------------------------------------------------ events
     $ui.SearchBox.Add_TextChanged({
         $ui.SearchHint.Visibility = if ($ui.SearchBox.Text) { 'Collapsed' } else { 'Visible' }
+        $ui.SearchClear.Visibility = if ($ui.SearchBox.Text) { 'Visible' } else { 'Collapsed' }
         & $render
     })
+    $ui.SearchClear.Add_Click({ $ui.SearchBox.Text = ''; $ui.SearchBox.Focus() | Out-Null })
     $ui.SearchBox.Add_KeyDown({
         $e = $args[1]
         if ($e.Key -eq 'Escape') { $ui.SearchBox.Text = ''; $e.Handled = $true }

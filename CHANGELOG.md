@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.08] - 2026-11-19
+
+### Changed
+- **Search box.** The search box is now a rounded field with a magnifier icon, a softer border that
+  darkens on hover and a blue ring while you type, and a small **x** button to clear it (Esc still
+  clears too). It follows the light and dark looks.
+
 ## [1.07] - 2026-11-19
 
 ### Changed
