@@ -36,7 +36,7 @@
 #Requires -Version 5.1
 
 $script:EngineName    = 'Launcher Engine'
-$script:EngineVersion = '1.05'
+$script:EngineVersion = '1.06'
 $script:EngineDate    = '2026-11-16'
 
 # ===========================================================================
@@ -800,6 +800,49 @@ function Format-LauncherDate {
     } catch { return $Date }
 }
 
+# ---------------------------------------------------------------- look
+# Light (the profile's colours) or dark. In the dark look every window's XAML and
+# every colour made in code passes through Convert-LauncherColour, which swaps each
+# light grey or white for its dark partner. The profile's accent (the header band)
+# and highlight stay the same. $script:LauncherDark is set by Start-Launcher.
+$script:LauncherDark = $false
+$script:LauncherDarkColours = @{
+    '#FFFFFF' = '#20232B'; '#F3F4F7' = '#15171C'; '#EEF0F6' = '#2A2E38'; '#E2E5EF' = '#323745'; '#DADDE6' = '#343844'
+    '#C9CDD8' = '#3E4350'; '#8A90A2' = '#8E95A6'; '#5A6072' = '#A3A9B8'; '#3A4052' = '#C3C8D3'; '#333A4D' = '#D5D9E3'
+    '#1F2430' = '#E6E8EE'; '#A15C00' = '#E0A040'; '#B00020' = '#FF6B7D'
+}
+function Convert-LauncherColour {
+    param([string]$Text)
+    if (-not $script:LauncherDark -or -not $Text) { return $Text }
+    return [regex]::Replace($Text, '#[0-9A-Fa-f]{6}\b', {
+        param($m)
+        $k = $m.Value.ToUpperInvariant()
+        if ($script:LauncherDarkColours.ContainsKey($k)) { $script:LauncherDarkColours[$k] } else { $m.Value }
+    })
+}
+function Test-LauncherDark {
+    <# True for the dark look: Theme is Dark, or System while Windows' apps are dark. #>
+    param([string]$Mode)
+    if ($Mode -eq 'Dark') { return $true }
+    if ($Mode -eq 'System') {
+        try { return ([int](Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name AppsUseLightTheme -ErrorAction Stop).AppsUseLightTheme -eq 0) } catch { return $false }
+    }
+    return $false
+}
+function Set-LauncherTitleBar {
+    <# A dark title bar in the dark look (Windows 10 20H1 and later; older Windows ignores it). #>
+    param($Win)
+    if (-not $script:LauncherDark) { return }
+    try {
+        if (-not ('LauncherEngine.Dwm' -as [type])) {
+            Add-Type -Namespace 'LauncherEngine' -Name 'Dwm' -MemberDefinition '[DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);'
+        }
+        $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($Win)).Handle
+        $v = 1
+        if ($hwnd -ne [IntPtr]::Zero) { [void][LauncherEngine.Dwm]::DwmSetWindowAttribute($hwnd, 20, [ref]$v, 4) }
+    } catch { Write-Verbose $_.Exception.Message }
+}
+
 function Get-LauncherDialogStyles {
     <# The XAML styles for the launcher's dialog buttons: DialogOk (accent, semibold)
        and DialogCancel (quiet white), both rounded with hover, pressed and focus
@@ -899,7 +942,7 @@ $(Get-LauncherDialogStyles -Accent $Accent -AccentText $AccentText)
     <Border DockPanel.Dock="Top" Background="$Accent" Padding="20,14">
       <StackPanel Orientation="Horizontal">
         <Border x:Name="Badge" Width="28" Height="28" CornerRadius="14" VerticalAlignment="Center">
-          <TextBlock x:Name="Glyph" FontSize="15" FontWeight="Bold" Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          <TextBlock x:Name="Glyph" FontSize="15" FontWeight="Bold" Foreground="#FEFEFE" HorizontalAlignment="Center" VerticalAlignment="Center"/>
         </Border>
         <TextBlock x:Name="HeadingText" Foreground="$AccentText" FontSize="18" FontWeight="SemiBold" Margin="12,0,0,0" VerticalAlignment="Center"/>
       </StackPanel>
@@ -912,7 +955,8 @@ $(Get-LauncherDialogStyles -Accent $Accent -AccentText $AccentText)
   </DockPanel>
 </Window>
 "@
-    $dlg = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader ([xml]$dlgXaml)))
+    $dlg = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader ([xml](Convert-LauncherColour $dlgXaml))))
+    $dlg.Add_SourceInitialized({ Set-LauncherTitleBar $this })
     $dlg.Title = $Heading
     if ($Owner -and $Owner.IsVisible) { $dlg.Owner = $Owner; $dlg.Icon = $Owner.Icon }
     else { $dlg.WindowStartupLocation = 'CenterScreen'; $dlg.Topmost = $true; $dlg.ShowInTaskbar = $true }
@@ -976,7 +1020,8 @@ $(Get-LauncherDialogStyles -Accent $Accent -AccentText $AccentText)
   </StackPanel>
 </Window>
 "@
-    $dlg = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader ([xml]$dlgXaml)))
+    $dlg = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader ([xml](Convert-LauncherColour $dlgXaml))))
+    $dlg.Add_SourceInitialized({ Set-LauncherTitleBar $this })
     if ($Owner) { $dlg.Owner = $Owner; $dlg.Icon = $Owner.Icon }
     $pw1 = $dlg.FindName('Pw1'); $pw2 = $dlg.FindName('Pw2'); $err = $dlg.FindName('ErrorText')
     $dlg.FindName('PromptText').Text = $Prompt
@@ -1068,13 +1113,23 @@ function Start-Launcher {
     $settings = @{}
     if ($settingsObj) { foreach ($prop in $settingsObj.PSObject.Properties) { $settings[$prop.Name] = $prop.Value } }
 
+    # Look: Light (the profile's colours), Dark, or System (follow Windows), saved in settings.json.
+    $themeMode = [string]$settings['Theme']
+    if ($themeMode -notin 'Light', 'Dark', 'System') { $themeMode = 'Light' }
+    $script:LauncherDark = Test-LauncherDark $themeMode
+    if ($script:LauncherDark) {
+        $background = Get-ThemeColour 'DarkBackground' '#15171C'
+        # White text on the accent stays white (the colour map would turn white into a dark tile colour)
+        if ($accentText -eq '#FFFFFF') { $accentText = '#FEFEFE' }
+    }
+
     # ---------------------------------------------------------------- XAML
     $xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="$([Security.SecurityElement]::Escape("$AppName v$AppVersion"))"
         Width="1060" Height="720" MinWidth="560" MinHeight="420"
-        WindowStartupLocation="CenterScreen" Background="$background"
+        WindowStartupLocation="CenterScreen" Background="$background" Foreground="#1F2430"
         FontFamily="Segoe UI" FontSize="13" UseLayoutRounding="True"
         TextOptions.TextFormattingMode="Display">
   <Window.Resources>
@@ -1164,7 +1219,7 @@ function Start-Launcher {
           <ColumnDefinition Width="*"/>
           <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
-        <Border x:Name="LogoPlate" Grid.Column="0" Background="White" CornerRadius="6" Padding="6" Margin="0,0,14,0" VerticalAlignment="Center">
+        <Border x:Name="LogoPlate" Grid.Column="0" Background="#FFFFFE" CornerRadius="6" Padding="6" Margin="0,0,14,0" VerticalAlignment="Center">
           <Image x:Name="LogoImage" Height="44" RenderOptions.BitmapScalingMode="HighQuality"/>
         </Border>
         <StackPanel Grid.Column="1" VerticalAlignment="Center">
@@ -1176,13 +1231,15 @@ function Start-Launcher {
                   ToolTip="Change the password for private tools"/>
           <Button x:Name="LockButton" Style="{StaticResource HeaderButton}" Content="Lock" Visibility="Collapsed"
                   ToolTip="Hide the private tools again (Ctrl+Shift+U)"/>
+          <Button x:Name="LookButton" Style="{StaticResource HeaderButton}" Content="Look" ToolTip="Light, dark, or the same as Windows. Used the next time the launcher starts."/>
+          <Button x:Name="HelpButton" Style="{StaticResource HeaderButton}" Content="Help" ToolTip="How the launcher works (F1)"/>
           <Button x:Name="AboutButton" Style="{StaticResource HeaderButton}" Content="About" ToolTip="Version, licence and keyboard shortcuts"/>
           <Button x:Name="ExitButton" Style="{StaticResource HeaderButton}" Content="Exit" ToolTip="Close the launcher (Alt+F4)"/>
         </StackPanel>
       </Grid>
     </Border>
 
-    <Border Grid.Row="1" Background="White" BorderBrush="#DADDE6" BorderThickness="0,0,0,1" Padding="20,10">
+    <Border Grid.Row="1" Background="#FFFFFF" BorderBrush="#DADDE6" BorderThickness="0,0,0,1" Padding="20,10">
       <Grid>
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="*" MaxWidth="460"/>
@@ -1190,7 +1247,7 @@ function Start-Launcher {
           <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
         <Grid Grid.Column="0">
-          <TextBox x:Name="SearchBox" Padding="8,6" VerticalContentAlignment="Center" BorderBrush="#C9CDD8"
+          <TextBox x:Name="SearchBox" Padding="8,6" VerticalContentAlignment="Center" BorderBrush="#C9CDD8" Background="#FFFFFF" Foreground="#1F2430" CaretBrush="#1F2430"
                    ToolTip="Search by name, description or category (Ctrl+F). Enter starts the only match; Esc clears."/>
           <TextBlock x:Name="SearchHint" Text="Search tools" Foreground="#8A90A2" Margin="11,0,0,0"
                      VerticalAlignment="Center" IsHitTestVisible="False"/>
@@ -1211,17 +1268,18 @@ function Start-Launcher {
       </StackPanel>
     </ScrollViewer>
 
-    <Border Grid.Row="3" Background="White" BorderBrush="#DADDE6" BorderThickness="0,1,0,0" Padding="20,6">
+    <Border Grid.Row="3" Background="#FFFFFF" BorderBrush="#DADDE6" BorderThickness="0,1,0,0" Padding="20,6">
       <TextBlock x:Name="StatusText" Foreground="#5A6072" TextTrimming="CharacterEllipsis"/>
     </Border>
   </Grid>
 </Window>
 "@
 
-    $reader = New-Object System.Xml.XmlNodeReader ([xml]$xaml)
+    $reader = New-Object System.Xml.XmlNodeReader ([xml](Convert-LauncherColour $xaml))
     $window = [Windows.Markup.XamlReader]::Load($reader)
+    $window.Add_SourceInitialized({ Set-LauncherTitleBar $this })
     $ui = @{}
-    foreach ($n in 'LogoPlate', 'LogoImage', 'TitleText', 'SubtitleText', 'PasswordButton', 'LockButton', 'AboutButton', 'ExitButton', 'SearchBox', 'SearchHint',
+    foreach ($n in 'LogoPlate', 'LogoImage', 'TitleText', 'SubtitleText', 'PasswordButton', 'LockButton', 'LookButton', 'HelpButton', 'AboutButton', 'ExitButton', 'SearchBox', 'SearchHint',
                    'FolderButton', 'RefreshButton', 'EmptyText', 'ToolPanel', 'StatusText') {
         $ui[$n] = $window.FindName($n)
     }
@@ -1254,9 +1312,17 @@ function Start-Launcher {
     $bc = New-Object System.Windows.Media.BrushConverter
     $brushAccent    = $bc.ConvertFromString($accent)
     $brushHighlight = $bc.ConvertFromString($highlight)
-    $brushBorder    = $bc.ConvertFromString('#DADDE6')
-    $brushMuted     = $bc.ConvertFromString('#5A6072')
-    $brushWarn      = $bc.ConvertFromString('#A15C00')
+    $brushBorder    = $bc.ConvertFromString((Convert-LauncherColour '#DADDE6'))
+    $brushMuted     = $bc.ConvertFromString((Convert-LauncherColour '#5A6072'))
+    $brushWarn      = $bc.ConvertFromString((Convert-LauncherColour '#A15C00'))
+    $brushTile      = $bc.ConvertFromString((Convert-LauncherColour '#FFFFFF'))
+    $brushDesc      = $bc.ConvertFromString((Convert-LauncherColour '#3A4052'))
+    # Tool names and category headings use the accent; in the dark look a lighter mix of it, so they read on dark tiles.
+    $brushName = $brushAccent
+    if ($script:LauncherDark) {
+        $ac = [System.Windows.Media.ColorConverter]::ConvertFromString($accent)
+        $brushName = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.Color]::FromRgb([byte](($ac.R + 255 * 2) / 3), [byte](($ac.G + 255 * 2) / 3), [byte](($ac.B + 255 * 2) / 3)))
+    }
 
     # Shared state for the event handlers below
     $state = @{ Tools = @(); Roots = @(); Shown = @(); Unlocked = $false; VaultOpenedByUs = $false; LastActivity = Get-Date }
@@ -1315,13 +1381,13 @@ function Start-Launcher {
         $border.Width = 318
         $border.Margin = '0,0,12,12'
         $border.Padding = '14,14,14,8'
-        $border.Background = [System.Windows.Media.Brushes]::White
+        $border.Background = $brushTile
         $border.BorderBrush = $brushBorder
         $border.BorderThickness = 1
         $border.CornerRadius = 6
         $border.Tag = @{ Tool = $Tool; Action = 'Open' }
         $border.ToolTip = if ($Tool.Target) { "Double-click to start`n$($Tool.Target)" } else { $Tool.Warning }
-        $border.Add_MouseEnter({ $args[0].BorderBrush = $brushAccent })
+        $border.Add_MouseEnter({ $args[0].BorderBrush = $brushName })
         $border.Add_MouseLeave({ $args[0].BorderBrush = $brushBorder })
         $border.Add_MouseLeftButtonDown({
             param($s, $e)
@@ -1361,7 +1427,7 @@ function Start-Launcher {
         $nameText = New-Object System.Windows.Controls.TextBlock
         $nameText.Text = $Tool.Name
         $nameText.FontSize = 15; $nameText.FontWeight = 'SemiBold'
-        $nameText.Foreground = $brushAccent
+        $nameText.Foreground = $brushName
         $nameText.TextTrimming = 'CharacterEllipsis'
         $names.Children.Add($nameText) | Out-Null
 
@@ -1393,7 +1459,7 @@ function Start-Launcher {
         $desc.Text = if ($Tool.Description) { $Tool.Description } else { $Tool.Folder }
         $desc.TextWrapping = 'Wrap'
         $desc.TextTrimming = 'WordEllipsis'
-        $desc.Foreground = $bc.ConvertFromString('#3A4052')
+        $desc.Foreground = $brushDesc
         $desc.Margin = '0,10,0,8'
         $desc.LineHeight = 18
         $desc.LineStackingStrategy = 'BlockLineHeight'
@@ -1485,7 +1551,7 @@ function Start-Launcher {
             $h = New-Object System.Windows.Controls.TextBlock
             $h.Text = "$($g.Name)  ($($g.Count))"
             $h.FontSize = 14; $h.FontWeight = 'SemiBold'
-            $h.Foreground = $brushAccent
+            $h.Foreground = $brushName
             $header.Children.Add($h) | Out-Null
             $panel.Children.Add($header) | Out-Null
 
@@ -1667,6 +1733,48 @@ function Start-Launcher {
         $null = Show-LauncherMessage -Owner $window -Text ($lines -join "`n") -Kind 'Information' -Heading "About $AppName" -Buttons @('Close') `
             -Accent $accent -AccentText $accentText -Background $background
     })
+    # Look: Light -> Dark -> Follow Windows. Saved now; used the next time the launcher starts.
+    $state.ThemeMode = $themeMode
+    $setLookText = { $ui.LookButton.Content = switch ($state.ThemeMode) { 'Dark' { 'Look: Dark' } 'System' { 'Look: Auto' } default { 'Look: Light' } } }
+    & $setLookText
+    $ui.LookButton.Add_Click({
+        $state.ThemeMode = switch ($state.ThemeMode) { 'Light' { 'Dark' } 'Dark' { 'System' } default { 'Light' } }
+        $settings['Theme'] = $state.ThemeMode
+        Save-LauncherSettings -Path $settingsPath -Settings $settings
+        & $setLookText
+        $word = switch ($state.ThemeMode) { 'Dark' { 'Dark look' } 'System' { 'The same look as Windows' } default { 'Light look' } }
+        & $setStatus "$word from the next time the launcher starts."
+    })
+    $showHelp = {
+        $lines = @(
+            'Every tool in the folders below is listed as a tile, grouped by category.',
+            '',
+            'Starting a tool',
+            "    Double-click a tile, or press Open. Run as admin starts it as administrator (Windows asks first). Tiles say when a tool has no build yet.",
+            '',
+            'Finding a tool',
+            "    Type in the search box (Ctrl+F) to filter by name, description or category. Enter starts the only match; Esc clears the search.",
+            '',
+            'On each tile',
+            "    Folder opens the tool's project folder; Readme, Help and GitHub open its README, guide and repo when it has them. The version and date are the newest build's.",
+            '',
+            'The tools folder',
+            "    Tools folder... chooses where the launcher looks; Refresh (F5) looks again after you add or build a tool."
+        )
+        # Private tools are only explained once they're unlocked, so the Help gives nothing away.
+        if ($privateLock -and $state.Unlocked) {
+            $lines += @('', 'Private tools',
+                "    Private tools show while unlocked with your password (Ctrl+Shift+U). Lock, closing the launcher or $idleMinutes minutes without use hides them again." + $(if ($vault) { ' Unlocking also opens the Private vault (Windows asks for administrator rights), and locking closes it.' } else { '' }))
+        }
+        $lines += @('', 'Look',
+            "    Look switches between Light, Dark and the same as Windows; the new look is used the next time the launcher starts.",
+            '', 'Keys',
+            "    Ctrl+F search     Enter start the only match     Esc clear     F5 refresh     F1 this help" + $(if ($privateLock -and $state.Unlocked) { '     Ctrl+Shift+U unlock or lock' } else { '' }),
+            '', 'Looking in:', "    $($state.Roots -join "`n    ")")
+        $null = Show-LauncherMessage -Owner $window -Text ($lines -join "`n") -Kind 'Information' -Heading 'Help' -Buttons @('Close') `
+            -Accent $accent -AccentText $accentText -Background $background
+    }
+    $ui.HelpButton.Add_Click($showHelp)
     # Exit closes the window the same way as the title bar's X, so the Closing
     # handler still re-locks private tools and the vault.
     $ui.ExitButton.Add_Click({ $window.Close() })
@@ -1675,6 +1783,7 @@ function Start-Launcher {
         $ctrl = ([System.Windows.Input.Keyboard]::Modifiers -band [System.Windows.Input.ModifierKeys]::Control) -ne 0
         $shift = ([System.Windows.Input.Keyboard]::Modifiers -band [System.Windows.Input.ModifierKeys]::Shift) -ne 0
         if ($e.Key -eq 'F5') { & $scan; $e.Handled = $true }
+        elseif ($e.Key -eq 'F1') { & $showHelp; $e.Handled = $true }
         elseif ($privateLock -and $ctrl -and $shift -and $e.Key -eq 'U') {
             if ($state.Unlocked) { & $lock 'manual' } else { & $unlock }
             $e.Handled = $true

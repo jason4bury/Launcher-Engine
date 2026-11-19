@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.06] - 2026-11-19
+
+### Added
+- **Dark look.** A **Look** button in the header cycles **Light** (the profile's colours, the
+  default), **Dark** and **Auto** (the same as Windows), saved as `Theme` in the launcher's
+  `settings.json` and used the next time it starts. In the dark look every window's colours pass
+  through one light-to-dark map (`Convert-LauncherColour`): tiles, bars, buttons, search box,
+  message and password boxes, with a dark title bar. The profile's accent header and highlight
+  stay; tool names and headings use a lighter mix of the accent. A profile can set
+  `Theme.DarkBackground`.
+- **Help.** A **Help** button (or F1) explains starting and finding tools, the tile buttons, the
+  tools folder, the look and the keys. Private tools are only explained while they're unlocked.
+
 ## [1.05] - 2026-11-19
 
 ### Changed

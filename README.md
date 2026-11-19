@@ -6,7 +6,7 @@
 
 The shared code behind the Home Launcher: finds tools from the folder layout and shows them as tiles you can search and start.
 
-![Version](https://img.shields.io/badge/version-v1.05-blue) ![Platform](https://img.shields.io/badge/platform-Windows-0078D6) ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207-5391FE) ![Licence](https://img.shields.io/badge/licence-MIT-green)
+![Version](https://img.shields.io/badge/version-v1.06-blue) ![Platform](https://img.shields.io/badge/platform-Windows-0078D6) ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207-5391FE) ![Licence](https://img.shields.io/badge/licence-MIT-green)
 
 ## ✨ Features
 
