@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.07] - 2026-11-19
+
+### Changed
+- **Slim scrollbar.** The tool list and the message box scroll with a thin rounded handle on a clear
+  track, with no arrow buttons, instead of Windows' grey scrollbar. It widens a little while the
+  pointer is over it and darkens on hover and drag. Its colours go through the same light-to-dark
+  map, so it follows the dark look.
+
 ## [1.06] - 2026-11-19
 
 ### Added

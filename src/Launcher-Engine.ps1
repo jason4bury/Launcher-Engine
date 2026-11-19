@@ -36,7 +36,7 @@
 #Requires -Version 5.1
 
 $script:EngineName    = 'Launcher Engine'
-$script:EngineVersion = '1.06'
+$script:EngineVersion = '1.07'
 $script:EngineDate    = '2026-11-16'
 
 # ===========================================================================
@@ -843,6 +843,60 @@ function Set-LauncherTitleBar {
     } catch { Write-Verbose $_.Exception.Message }
 }
 
+function Get-LauncherScrollStyle {
+    <# A slim rounded scrollbar for every list and dialog: a thin handle with no arrow
+       buttons on a clear track. It widens a little while the pointer is over the
+       scrollbar and darkens on hover and drag. Its greys pass through
+       Convert-LauncherColour with the rest of the XAML, so it follows the dark look. #>
+    return @"
+    <Style TargetType="ScrollBar">
+      <Setter Property="Background" Value="Transparent"/>
+      <Style.Triggers>
+        <Trigger Property="Orientation" Value="Vertical">
+          <Setter Property="Width" Value="12"/>
+          <Setter Property="MinWidth" Value="12"/>
+          <Setter Property="Template">
+            <Setter.Value>
+              <ControlTemplate TargetType="ScrollBar">
+                <Grid Background="Transparent">
+                  <Track x:Name="PART_Track" IsDirectionReversed="True">
+                    <Track.DecreaseRepeatButton>
+                      <RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" Focusable="False" IsTabStop="False"/>
+                    </Track.DecreaseRepeatButton>
+                    <Track.Thumb>
+                      <Thumb>
+                        <Thumb.Template>
+                          <ControlTemplate TargetType="Thumb">
+                            <Border x:Name="ThumbBar" Width="6" Margin="0,3" CornerRadius="4" HorizontalAlignment="Center" Background="#C9CDD8"/>
+                            <ControlTemplate.Triggers>
+                              <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ScrollBar}}" Value="True">
+                                <Setter TargetName="ThumbBar" Property="Width" Value="9"/>
+                              </DataTrigger>
+                              <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ThumbBar" Property="Background" Value="#8A90A2"/>
+                              </Trigger>
+                              <Trigger Property="IsDragging" Value="True">
+                                <Setter TargetName="ThumbBar" Property="Background" Value="#5A6072"/>
+                              </Trigger>
+                            </ControlTemplate.Triggers>
+                          </ControlTemplate>
+                        </Thumb.Template>
+                      </Thumb>
+                    </Track.Thumb>
+                    <Track.IncreaseRepeatButton>
+                      <RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" Focusable="False" IsTabStop="False"/>
+                    </Track.IncreaseRepeatButton>
+                  </Track>
+                </Grid>
+              </ControlTemplate>
+            </Setter.Value>
+          </Setter>
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+"@
+}
+
 function Get-LauncherDialogStyles {
     <# The XAML styles for the launcher's dialog buttons: DialogOk (accent, semibold)
        and DialogCancel (quiet white), both rounded with hover, pressed and focus
@@ -937,6 +991,7 @@ function Show-LauncherMessage {
         FontFamily="Segoe UI" FontSize="13" UseLayoutRounding="True" Background="$Background">
   <Window.Resources>
 $(Get-LauncherDialogStyles -Accent $Accent -AccentText $AccentText)
+$(Get-LauncherScrollStyle)
   </Window.Resources>
   <DockPanel Background="$Background">
     <Border DockPanel.Dock="Top" Background="$Accent" Padding="20,14">
@@ -1007,6 +1062,7 @@ function Show-LauncherPasswordDialog {
         FontFamily="Segoe UI" FontSize="13" UseLayoutRounding="True">
   <Window.Resources>
 $(Get-LauncherDialogStyles -Accent $Accent -AccentText $AccentText)
+$(Get-LauncherScrollStyle)
   </Window.Resources>
   <StackPanel Margin="18,16,18,14">
     <TextBlock x:Name="PromptText" TextWrapping="Wrap" Margin="0,0,0,8"/>
@@ -1133,6 +1189,7 @@ function Start-Launcher {
         FontFamily="Segoe UI" FontSize="13" UseLayoutRounding="True"
         TextOptions.TextFormattingMode="Display">
   <Window.Resources>
+$(Get-LauncherScrollStyle)
     <Style x:Key="PrimaryButton" TargetType="Button">
       <Setter Property="Background" Value="$accent"/>
       <Setter Property="Foreground" Value="$accentText"/>
