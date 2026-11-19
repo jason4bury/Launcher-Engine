@@ -36,7 +36,7 @@
 #Requires -Version 5.1
 
 $script:EngineName    = 'Launcher Engine'
-$script:EngineVersion = '1.04'
+$script:EngineVersion = '1.05'
 $script:EngineDate    = '2026-11-16'
 
 # ===========================================================================
@@ -800,30 +800,12 @@ function Format-LauncherDate {
     } catch { return $Date }
 }
 
-function Show-LauncherPasswordDialog {
-    <# A small modal password box. With -AskTwice it asks twice (for a new
-       password) and insists on 6+ characters. Returns a SecureString, or
-       $null if cancelled. OK and Cancel use the launcher's own rounded
-       button look (accent and quiet), with hover, pressed and focus states;
-       Enter is OK and Esc is Cancel. #>
-    param(
-        [System.Windows.Window]$Owner,
-        [string]$Title,
-        [string]$Prompt,
-        [switch]$AskTwice,
-        [string]$Accent = '#252D63',
-        [string]$AccentText = '#FFFFFF'
-    )
-    $confirmRow = if ($AskTwice) {
-        '<TextBlock Text="Type it again" Margin="0,10,0,4"/><PasswordBox x:Name="Pw2" Padding="6,4"/>'
-    } else { '' }
-    $dlgXaml = @"
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="$([Security.SecurityElement]::Escape($Title))" Width="380" SizeToContent="Height"
-        ResizeMode="NoResize" WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
-        FontFamily="Segoe UI" FontSize="13" UseLayoutRounding="True">
-  <Window.Resources>
+function Get-LauncherDialogStyles {
+    <# The XAML styles for the launcher's dialog buttons: DialogOk (accent, semibold)
+       and DialogCancel (quiet white), both rounded with hover, pressed and focus
+       states. Shared by the password and message boxes. #>
+    param([string]$Accent = '#252D63', [string]$AccentText = '#FFFFFF')
+    return @"
     <Style x:Key="DialogButton" TargetType="Button">
       <Setter Property="MinWidth" Value="92"/>
       <Setter Property="Height" Value="32"/>
@@ -874,6 +856,113 @@ function Show-LauncherPasswordDialog {
         </Setter.Value>
       </Setter>
     </Style>
+"@
+}
+
+function Show-LauncherMessage {
+    <# A message or question box in the launcher's own look, instead of Windows'
+       plain grey MessageBox: an accent-coloured header band with a coloured badge
+       and a heading, the message (selectable, scrolls when long) and rounded
+       buttons. $Kind is Information, Warning, Error or Question. The first of
+       $Buttons is the main (accent) button and Enter presses it; the last is
+       pressed by Esc or the X and has the focus, so a stray Space doesn't
+       confirm. Returns the text of the button pressed. #>
+    param(
+        [System.Windows.Window]$Owner,
+        [string]$Text,
+        [string]$Kind = 'Information',
+        [string[]]$Buttons = @('OK'),
+        [string]$Heading = '',
+        [string]$Accent = '#252D63',
+        [string]$AccentText = '#FFFFFF',
+        [string]$Background = '#F3F4F7'
+    )
+    $kinds = @{
+        Information = @{ Glyph = 'i';               Color = '#2F80ED'; Heading = 'Good to know' }
+        Warning     = @{ Glyph = '!';               Color = '#E08A00'; Heading = 'Heads up' }
+        Error       = @{ Glyph = [string][char]0xD7; Color = '#C62828'; Heading = 'Something went wrong' }
+        Question    = @{ Glyph = '?';               Color = '#2F80ED'; Heading = 'Just checking' }
+    }
+    $k = $kinds[$Kind]; if (-not $k) { $k = $kinds['Information'] }
+    if (-not $Heading) { $Heading = $k.Heading }
+    if (-not $Buttons -or $Buttons.Count -eq 0) { $Buttons = @('OK') }
+    $width = 460; if ($Text.Length -gt 380) { $width = 560 }
+    $dlgXaml = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Width="$width" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        FontFamily="Segoe UI" FontSize="13" UseLayoutRounding="True" Background="$Background">
+  <Window.Resources>
+$(Get-LauncherDialogStyles -Accent $Accent -AccentText $AccentText)
+  </Window.Resources>
+  <DockPanel Background="$Background">
+    <Border DockPanel.Dock="Top" Background="$Accent" Padding="20,14">
+      <StackPanel Orientation="Horizontal">
+        <Border x:Name="Badge" Width="28" Height="28" CornerRadius="14" VerticalAlignment="Center">
+          <TextBlock x:Name="Glyph" FontSize="15" FontWeight="Bold" Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
+        <TextBlock x:Name="HeadingText" Foreground="$AccentText" FontSize="18" FontWeight="SemiBold" Margin="12,0,0,0" VerticalAlignment="Center"/>
+      </StackPanel>
+    </Border>
+    <StackPanel x:Name="ButtonRow" DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="18,0,18,14"/>
+    <ScrollViewer MaxHeight="420" Margin="20,16,20,16" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+      <TextBox x:Name="MessageText" IsReadOnly="True" IsTabStop="False" TextWrapping="Wrap" BorderThickness="0" Padding="0"
+               Background="Transparent" Foreground="#1F2430"/>
+    </ScrollViewer>
+  </DockPanel>
+</Window>
+"@
+    $dlg = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader ([xml]$dlgXaml)))
+    $dlg.Title = $Heading
+    if ($Owner -and $Owner.IsVisible) { $dlg.Owner = $Owner; $dlg.Icon = $Owner.Icon }
+    else { $dlg.WindowStartupLocation = 'CenterScreen'; $dlg.Topmost = $true; $dlg.ShowInTaskbar = $true }
+    $dlg.FindName('Badge').Background = (New-Object Windows.Media.BrushConverter).ConvertFromString($k.Color)
+    $dlg.FindName('Glyph').Text = $k.Glyph
+    $dlg.FindName('HeadingText').Text = $Heading
+    $dlg.FindName('MessageText').Text = $Text
+    $row = $dlg.FindName('ButtonRow')
+    $pressed = @{ Value = $Buttons[-1] }
+    for ($i = 0; $i -lt $Buttons.Count; $i++) {
+        $b = New-Object System.Windows.Controls.Button
+        $b.Content = $Buttons[$i]
+        $b.Tag = $Buttons[$i]
+        if ($i -eq 0) { $b.Style = $dlg.FindResource('DialogOk'); $b.IsDefault = $true }
+        else { $b.Style = $dlg.FindResource('DialogCancel') }
+        if ($i -lt $Buttons.Count - 1) { $b.Margin = New-Object System.Windows.Thickness 0, 0, 8, 0 }
+        if ($i -eq $Buttons.Count - 1) { $b.IsCancel = $true }
+        $b.Add_Click({ $pressed.Value = [string]$this.Tag; [System.Windows.Window]::GetWindow($this).Close() })
+        [void]$row.Children.Add($b)
+    }
+    $dlg.Add_ContentRendered({ [void]$this.Activate(); $r = $this.FindName('ButtonRow'); [void]$r.Children[$r.Children.Count - 1].Focus() })
+    $null = $dlg.ShowDialog()
+    return $pressed.Value
+}
+
+function Show-LauncherPasswordDialog {
+    <# A small modal password box. With -AskTwice it asks twice (for a new
+       password) and insists on 6+ characters. Returns a SecureString, or
+       $null if cancelled. OK and Cancel use the launcher's own rounded
+       button look (accent and quiet), with hover, pressed and focus states;
+       Enter is OK and Esc is Cancel. #>
+    param(
+        [System.Windows.Window]$Owner,
+        [string]$Title,
+        [string]$Prompt,
+        [switch]$AskTwice,
+        [string]$Accent = '#252D63',
+        [string]$AccentText = '#FFFFFF'
+    )
+    $confirmRow = if ($AskTwice) {
+        '<TextBlock Text="Type it again" Margin="0,10,0,4"/><PasswordBox x:Name="Pw2" Padding="6,4"/>'
+    } else { '' }
+    $dlgXaml = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="$([Security.SecurityElement]::Escape($Title))" Width="380" SizeToContent="Height"
+        ResizeMode="NoResize" WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        FontFamily="Segoe UI" FontSize="13" UseLayoutRounding="True">
+  <Window.Resources>
+$(Get-LauncherDialogStyles -Accent $Accent -AccentText $AccentText)
   </Window.Resources>
   <StackPanel Margin="18,16,18,14">
     <TextBlock x:Name="PromptText" TextWrapping="Wrap" Margin="0,0,0,8"/>
@@ -925,6 +1014,8 @@ function Start-Launcher {
         are resolved from here.
     .PARAMETER AppName / AppVersion / AppDate / AppCopyright
         The wrapper's identity, shown in the title bar and About box.
+    .PARAMETER AppNote
+        An optional line for the About box, such as what's new in this version.
     .PARAMETER Assets
         Images embedded by the build: file name -> base64.
     .PARAMETER AssetPath
@@ -932,7 +1023,7 @@ function Start-Launcher {
         embedded (running from source).
     #>
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '',
-        Justification = 'LauncherHome, AppDate, AppCopyright, Assets and AssetPath are used inside the event-handler scriptblocks and nested helpers below, which the rule does not follow.')]
+        Justification = 'LauncherHome, AppDate, AppCopyright, AppNote, Assets and AssetPath are used inside the event-handler scriptblocks and nested helpers below, which the rule does not follow.')]
     param(
         [Parameter(Mandatory)][object]$LauncherProfile,
         [Parameter(Mandatory)][string]$LauncherHome,
@@ -940,6 +1031,7 @@ function Start-Launcher {
         [string]$AppVersion = '',
         [string]$AppDate = '',
         [string]$AppCopyright = '',
+        [string]$AppNote = '',
         [hashtable]$Assets = @{},
         [string]$AssetPath
     )
@@ -1177,7 +1269,7 @@ function Start-Launcher {
 
     $showError = {
         param([string]$Text)
-        [System.Windows.MessageBox]::Show($window, $Text, $AppName, 'OK', 'Warning') | Out-Null
+        $null = Show-LauncherMessage -Owner $window -Text $Text -Kind 'Warning' -Accent $accent -AccentText $accentText -Background $background
     }
 
     $runAction = {
@@ -1487,10 +1579,10 @@ function Start-Launcher {
                 if ($Reason -eq 'idle') {
                     $doLock = $false
                 } else {
-                    $answer = [System.Windows.MessageBox]::Show($window,
-                        "$($running -join ', ') is still running from the vault.`n`nLock the vault anyway? Yes locks it (close the tool first if you can). No leaves the vault unlocked.",
-                        $AppName, 'YesNo', 'Warning')
-                    $doLock = ($answer -eq 'Yes')
+                    $answer = Show-LauncherMessage -Owner $window -Kind 'Warning' -Accent $accent -AccentText $accentText -Background $background `
+                        -Text "$($running -join ', ') is still running from the vault.`n`nLock the vault anyway? Close the tool first if you can, or leave the vault unlocked for now." `
+                        -Buttons @('Lock the vault', 'Leave it unlocked')
+                    $doLock = ($answer -eq 'Lock the vault')
                 }
             }
             if ($doLock) {
@@ -1570,8 +1662,10 @@ function Start-Launcher {
             'Shortcuts: Ctrl+F search, Enter start the only match, Esc clear, F5 refresh.',
             "Settings: $settingsPath"
         )
+        if ($AppNote) { $lines += @('', $AppNote) }
         if ($state.Unlocked) { $lines += @('', 'Private tools are unlocked. Ctrl+Shift+U or Lock hides them again.') }
-        [System.Windows.MessageBox]::Show($window, ($lines -join "`n"), "About $AppName", 'OK', 'Information') | Out-Null
+        $null = Show-LauncherMessage -Owner $window -Text ($lines -join "`n") -Kind 'Information' -Heading "About $AppName" -Buttons @('Close') `
+            -Accent $accent -AccentText $accentText -Background $background
     })
     # Exit closes the window the same way as the title bar's X, so the Closing
     # handler still re-locks private tools and the vault.

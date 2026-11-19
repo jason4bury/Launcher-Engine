@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.05] - 2026-11-19
+
+### Changed
+- **Messages and questions in the launcher's own look.** The warning box, the "still running
+  from the vault" question and the About box now open in a launcher window instead of
+  Windows' plain grey message box: an accent-coloured header band (the profile's
+  `Theme.Accent`) with a coloured badge and a heading, the message on the profile's
+  `Theme.Background`, and the same rounded buttons as the password boxes. The text can be
+  selected and copied.
+- The vault question has plainly named buttons, **Lock the vault** or **Leave it unlocked**,
+  instead of Yes and No. The safe button has the focus, Enter presses the main one and Esc
+  or the X leaves the vault unlocked.
+
+### Added
+- `Show-LauncherMessage` (owner, text, kind, buttons, heading and theme colours; returns the
+  button pressed) and `Get-LauncherDialogStyles`, the shared button styles now used by both
+  the password and message boxes.
+- `Start-Launcher -AppNote`: an optional line for the About box, such as what's new.
+
 ## [1.04] - 2026-11-16
 
 ### Changed
