@@ -36,7 +36,7 @@
 #Requires -Version 5.1
 
 $script:EngineName    = 'Launcher Engine'
-$script:EngineVersion = '1.08'
+$script:EngineVersion = '1.09'
 $script:EngineDate    = '2026-11-16'
 
 # ===========================================================================
@@ -1052,21 +1052,44 @@ function Show-LauncherPasswordDialog {
         [string]$AccentText = '#FFFFFF'
     )
     $confirmRow = if ($AskTwice) {
-        '<TextBlock Text="Type it again" Margin="0,10,0,4"/><PasswordBox x:Name="Pw2" Padding="6,4"/>'
+        '<TextBlock Text="Type it again" Margin="0,10,0,4"/><PasswordBox x:Name="Pw2"/>'
     } else { '' }
     $dlgXaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="$([Security.SecurityElement]::Escape($Title))" Width="380" SizeToContent="Height"
         ResizeMode="NoResize" WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
-        FontFamily="Segoe UI" FontSize="13" UseLayoutRounding="True">
+        FontFamily="Segoe UI" FontSize="13" UseLayoutRounding="True" Background="#F3F4F7" Foreground="#1F2430">
   <Window.Resources>
 $(Get-LauncherDialogStyles -Accent $Accent -AccentText $AccentText)
 $(Get-LauncherScrollStyle)
+    <!-- The password boxes in the launcher's look: rounded, a blue ring while typing. -->
+    <Style TargetType="PasswordBox">
+      <Setter Property="Background" Value="#FFFFFF"/>
+      <Setter Property="Foreground" Value="#1F2430"/>
+      <Setter Property="CaretBrush" Value="#1F2430"/>
+      <Setter Property="Height" Value="34"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="PasswordBox">
+            <Border x:Name="Bd" CornerRadius="6" BorderThickness="1" BorderBrush="#C9CDD8" Background="{TemplateBinding Background}" Padding="9,0">
+              <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center" Focusable="False"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="#8A90A2"/></Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True">
+                <Setter TargetName="Bd" Property="BorderBrush" Value="#2F80ED"/><Setter TargetName="Bd" Property="BorderThickness" Value="2"/><Setter TargetName="Bd" Property="Padding" Value="8,0"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
   </Window.Resources>
   <StackPanel Margin="18,16,18,14">
     <TextBlock x:Name="PromptText" TextWrapping="Wrap" Margin="0,0,0,8"/>
-    <PasswordBox x:Name="Pw1" Padding="6,4"/>
+    <PasswordBox x:Name="Pw1"/>
     $confirmRow
     <TextBlock x:Name="ErrorText" Foreground="#B00020" TextWrapping="Wrap" Margin="0,8,0,0" Visibility="Collapsed"/>
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">

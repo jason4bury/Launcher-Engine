@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.09] - 2026-11-20
+
+### Fixed
+- **Password dialog in the dark look.** The Unlock, Set a password and Change password box kept a
+  white body and white password fields in the dark look. Its background, text and password fields
+  now follow the look (Light, Dark or Auto) like the rest of the launcher, and the fields are
+  rounded with a blue ring while you type.
+
 ## [1.08] - 2026-11-19
 
 ### Changed
