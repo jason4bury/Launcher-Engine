@@ -36,7 +36,7 @@
 #Requires -Version 5.1
 
 $script:EngineName    = 'Launcher Engine'
-$script:EngineVersion = '1.09'
+$script:EngineVersion = '1.10'
 $script:EngineDate    = '2026-11-16'
 
 # ===========================================================================
@@ -260,6 +260,7 @@ function Get-LauncherTool {
         RepoUrl      = $null
         ReadmePath   = $null
         Warning      = $null
+        TargetSet    = $false
     }
 
     # --- Version and date from the CHANGELOG ---
@@ -276,6 +277,7 @@ function Get-LauncherTool {
         $tool.Mode = 'url'; $tool.Target = $url
     } else {
         if ($target) {
+            $tool.TargetSet = $true
             $candidate = if ([IO.Path]::IsPathRooted($target)) { $target } else { Join-Path $ProjectPath $target }
             if (Test-Path -LiteralPath $candidate) { $tool.Target = (Resolve-Path -LiteralPath $candidate).ProviderPath }
             else { $tool.Warning = "Target not found: $target" }
@@ -1179,6 +1181,10 @@ function Start-Launcher {
     $defaultCategory = [string](Get-LauncherValue @($p) @('DefaultCategory'))
     if (-not $defaultCategory) { $defaultCategory = 'Tools' }
     $categoryOrder = @(Get-LauncherValue @($p) @('Categories')) | Where-Object { $_ }
+    # "SectionTabs": true shows one tab per section instead of headings down the page.
+    $sectionTabs = ConvertTo-LauncherBool (Get-LauncherValue @($p) @('SectionTabs'))
+    $winWidth  = Get-LauncherValue @($p) @('WindowWidth')
+    $winHeight = Get-LauncherValue @($p) @('WindowHeight')
 
     # Private-tool lock (profile PrivateLock, IdleLockMinutes, PrivateRoots, Vault)
     $privateLock = ConvertTo-LauncherBool (Get-LauncherValue @($p) @('PrivateLock'))
@@ -1329,7 +1335,7 @@ $(Get-LauncherScrollStyle)
         <Grid Grid.Column="0">
           <!-- Rounded search box: magnifier on the left, a clear button on the right, a blue ring while typing. -->
           <TextBox x:Name="SearchBox" Height="36" VerticalContentAlignment="Center" Foreground="#1F2430" CaretBrush="#1F2430"
-                   ToolTip="Search by name, description or category (Ctrl+F). Enter starts the only match; Esc clears.">
+                   ToolTip="Search by name, description or section (Ctrl+F). Enter starts the only match; Esc clears.">
             <TextBox.Template>
               <ControlTemplate TargetType="TextBox">
                 <Border x:Name="Bd" CornerRadius="18" BorderThickness="1" BorderBrush="#C9CDD8" Background="#FFFFFF" Padding="38,0,36,0">
@@ -1369,6 +1375,8 @@ $(Get-LauncherScrollStyle)
           </Button>
         </Grid>
         <StackPanel Grid.Column="2" Orientation="Horizontal">
+          <Button x:Name="ViewButton" Style="{StaticResource QuietButton}" Margin="8,0,0,0" Content="View: Tiles"
+                  ToolTip="Show the tools as tiles or as a compact list"/>
           <Button x:Name="FolderButton" Style="{StaticResource QuietButton}" Margin="8,0,0,0" Content="Tools folder..."
                   ToolTip="Choose the folder the launcher looks in for tools"/>
           <Button x:Name="RefreshButton" Style="{StaticResource QuietButton}" Margin="8,0,0,0" Content="Refresh"
@@ -1377,12 +1385,17 @@ $(Get-LauncherScrollStyle)
       </Grid>
     </Border>
 
-    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+    <DockPanel Grid.Row="2">
+    <Border x:Name="TabBar" DockPanel.Dock="Top" BorderBrush="#DADDE6" BorderThickness="0,0,0,1" Padding="20,6,20,0" Visibility="Collapsed">
+      <WrapPanel x:Name="TabPanel"/>
+    </Border>
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
       <StackPanel Margin="20,16,8,8">
         <TextBlock x:Name="EmptyText" Visibility="Collapsed" TextWrapping="Wrap" Foreground="#5A6072" FontSize="14" Margin="0,8,12,0"/>
         <StackPanel x:Name="ToolPanel"/>
       </StackPanel>
     </ScrollViewer>
+    </DockPanel>
 
     <Border Grid.Row="3" Background="#FFFFFF" BorderBrush="#DADDE6" BorderThickness="0,1,0,0" Padding="20,6">
       <TextBlock x:Name="StatusText" Foreground="#5A6072" TextTrimming="CharacterEllipsis"/>
@@ -1396,17 +1409,20 @@ $(Get-LauncherScrollStyle)
     $window.Add_SourceInitialized({ Set-LauncherTitleBar $this })
     $ui = @{}
     foreach ($n in 'LogoPlate', 'LogoImage', 'TitleText', 'SubtitleText', 'PasswordButton', 'LockButton', 'LookButton', 'HelpButton', 'AboutButton', 'ExitButton', 'SearchBox', 'SearchHint', 'SearchClear',
-                   'FolderButton', 'RefreshButton', 'EmptyText', 'ToolPanel', 'StatusText') {
+                   'ViewButton', 'FolderButton', 'RefreshButton', 'EmptyText', 'ToolPanel', 'StatusText', 'TabBar', 'TabPanel') {
         $ui[$n] = $window.FindName($n)
     }
 
     # Full height of the screen (above the taskbar) so every tile fits without
     # scrolling, 1060 wide, centred left to right.
     $workArea = [System.Windows.SystemParameters]::WorkArea
-    $window.Height = [Math]::Max($window.MinHeight, $workArea.Height)
+    # The profile's WindowWidth / WindowHeight, when set, are used instead (kept inside the screen).
+    if ("$winWidth" -match '^\d+$') { $window.Width = [double]$winWidth }
+    $window.Height = if ("$winHeight" -match '^\d+$') { [Math]::Min([double]$winHeight, $workArea.Height) } else { $workArea.Height }
+    $window.Height = [Math]::Max($window.MinHeight, $window.Height)
     $window.Width  = [Math]::Max($window.MinWidth, [Math]::Min($window.Width, $workArea.Width - 40))
     $window.WindowStartupLocation = 'Manual'
-    $window.Top  = $workArea.Top
+    $window.Top  = $workArea.Top + [Math]::Max(0, ($workArea.Height - $window.Height) / 2)
     $window.Left = $workArea.Left + [Math]::Max(0, ($workArea.Width - $window.Width) / 2)
 
     # Images: embedded first, then the asset folder
@@ -1433,6 +1449,7 @@ $(Get-LauncherScrollStyle)
     $brushWarn      = $bc.ConvertFromString((Convert-LauncherColour '#A15C00'))
     $brushTile      = $bc.ConvertFromString((Convert-LauncherColour '#FFFFFF'))
     $brushDesc      = $bc.ConvertFromString((Convert-LauncherColour '#3A4052'))
+    $brushTabHover  = $bc.ConvertFromString((Convert-LauncherColour '#E6E9F1'))
     # Tool names and category headings use the accent; in the dark look a lighter mix of it, so they read on dark tiles.
     $brushName = $brushAccent
     if ($script:LauncherDark) {
@@ -1442,6 +1459,11 @@ $(Get-LauncherScrollStyle)
 
     # Shared state for the event handlers below
     $state = @{ Tools = @(); Roots = @(); Shown = @(); Unlocked = $false; VaultOpenedByUs = $false; LastActivity = Get-Date }
+    # View (Tiles or List) and the folded sections, both kept in settings.json.
+    $state.View = if ([string]$settings['View'] -eq 'List') { 'List' } else { 'Tiles' }
+    $state.Collapsed = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($c in @($settings['Collapsed'])) { if ($c) { $null = $state.Collapsed.Add([string]$c) } }
+    $state.Tab = [string]$settings['Tab']
 
     # ------------------------------------------------------------ helpers
     $setStatus = {
@@ -1491,6 +1513,43 @@ $(Get-LauncherScrollStyle)
         return $b
     }
 
+    # Notes: missing build, or the build is older than the CHANGELOG
+    $getNote = {
+        param([object]$Tool)
+        $note = $Tool.Warning
+        if (-not $note -and -not $Tool.TargetSet -and @('exe', 'shortcut') -notcontains $Tool.Mode -and $Tool.Mode -ne 'html' -and $Tool.Mode -ne 'url' -and $Tool.Target -like "$($Tool.SourcePath)*") {
+            $note = 'No build in Builds\ yet: runs the script from Source\.'
+        }
+        if (-not $note -and $Tool.BuildVersion -and $Tool.Version -and $Tool.BuildVersion -ne $Tool.Version) {
+            $note = "Newest build is v$($Tool.BuildVersion); the CHANGELOG is at v$($Tool.Version)."
+        }
+        return $note
+    }
+
+    # Tool icon, or a letter badge in the accent when the tool has none.
+    $newIcon = {
+        param([object]$Tool, [int]$Size)
+        $iconImage = if ($Tool.IconPath) { Get-LauncherImage -Path $Tool.IconPath } else { $null }
+        if ($iconImage) {
+            $img = New-Object System.Windows.Controls.Image
+            $img.Source = $iconImage
+            $img.Width = $Size; $img.Height = $Size
+            [System.Windows.Media.RenderOptions]::SetBitmapScalingMode($img, 'HighQuality')
+            return $img
+        }
+        $badge = New-Object System.Windows.Controls.Border
+        $badge.Width = $Size; $badge.Height = $Size
+        $badge.CornerRadius = [Math]::Round($Size / 6)
+        $badge.Background = $brushAccent
+        $letter = New-Object System.Windows.Controls.TextBlock
+        $letter.Text = $Tool.Name.Substring(0, 1).ToUpperInvariant()
+        $letter.Foreground = [System.Windows.Media.Brushes]::White
+        $letter.FontSize = [Math]::Round($Size * 0.46); $letter.FontWeight = 'SemiBold'
+        $letter.HorizontalAlignment = 'Center'; $letter.VerticalAlignment = 'Center'
+        $badge.Child = $letter
+        return $badge
+    }
+
     $newTile = {
         param([object]$Tool)
         $border = New-Object System.Windows.Controls.Border
@@ -1514,28 +1573,9 @@ $(Get-LauncherScrollStyle)
 
         # Top row: icon + name + version
         $top = New-Object System.Windows.Controls.DockPanel
-        $iconImage = if ($Tool.IconPath) { Get-LauncherImage -Path $Tool.IconPath } else { $null }
-        if ($iconImage) {
-            $img = New-Object System.Windows.Controls.Image
-            $img.Source = $iconImage
-            $img.Width = 48; $img.Height = 48
-            $img.Margin = '0,0,12,0'
-            [System.Windows.Media.RenderOptions]::SetBitmapScalingMode($img, 'HighQuality')
-            $top.Children.Add($img) | Out-Null
-        } else {
-            $badge = New-Object System.Windows.Controls.Border
-            $badge.Width = 48; $badge.Height = 48
-            $badge.CornerRadius = 8
-            $badge.Background = $brushAccent
-            $badge.Margin = '0,0,12,0'
-            $letter = New-Object System.Windows.Controls.TextBlock
-            $letter.Text = $Tool.Name.Substring(0, 1).ToUpperInvariant()
-            $letter.Foreground = [System.Windows.Media.Brushes]::White
-            $letter.FontSize = 22; $letter.FontWeight = 'SemiBold'
-            $letter.HorizontalAlignment = 'Center'; $letter.VerticalAlignment = 'Center'
-            $badge.Child = $letter
-            $top.Children.Add($badge) | Out-Null
-        }
+        $icon = & $newIcon $Tool 48
+        $icon.Margin = '0,0,12,0'
+        $top.Children.Add($icon) | Out-Null
         [System.Windows.Controls.DockPanel]::SetDock($top.Children[0], 'Left')
 
         $names = New-Object System.Windows.Controls.StackPanel
@@ -1583,14 +1623,7 @@ $(Get-LauncherScrollStyle)
         $desc.ToolTip = $Tool.Description
         $stack.Children.Add($desc) | Out-Null
 
-        # Notes: missing build, or the build is older than the CHANGELOG
-        $note = $Tool.Warning
-        if (-not $note -and @('exe', 'shortcut') -notcontains $Tool.Mode -and $Tool.Mode -ne 'html' -and $Tool.Mode -ne 'url' -and $Tool.Target -like "$($Tool.SourcePath)*") {
-            $note = 'No build in Builds\ yet: runs the script from Source\.'
-        }
-        if (-not $note -and $Tool.BuildVersion -and $Tool.Version -and $Tool.BuildVersion -ne $Tool.Version) {
-            $note = "Newest build is v$($Tool.BuildVersion); the CHANGELOG is at v$($Tool.Version)."
-        }
+        $note = & $getNote $Tool
         if ($note) {
             $noteText = New-Object System.Windows.Controls.TextBlock
             $noteText.Text = $note
@@ -1629,8 +1662,152 @@ $(Get-LauncherScrollStyle)
         return $border
     }
 
+    # List view: one compact row per tool. Icon, name, version and description on one line,
+    # the same buttons as a tile on the right.
+    $newRow = {
+        param([object]$Tool)
+        $border = New-Object System.Windows.Controls.Border
+        $border.Margin = '0,0,12,6'
+        $border.Padding = '10,6,4,6'
+        $border.Background = $brushTile
+        $border.BorderBrush = $brushBorder
+        $border.BorderThickness = 1
+        $border.CornerRadius = 6
+        $border.Tag = @{ Tool = $Tool; Action = 'Open' }
+        $border.ToolTip = if ($Tool.Target) { "Double-click to start`n$($Tool.Target)" } else { $Tool.Warning }
+        $border.Add_MouseEnter({ $args[0].BorderBrush = $brushName })
+        $border.Add_MouseLeave({ $args[0].BorderBrush = $brushBorder })
+        $border.Add_MouseLeftButtonDown({
+            param($s, $e)
+            if ($e.ClickCount -eq 2 -and $s.Tag.Tool.Target) { & $runAction $s.Tag; $e.Handled = $true }
+        })
+
+        $dock = New-Object System.Windows.Controls.DockPanel
+        $icon = & $newIcon $Tool 28
+        $icon.Margin = '0,0,10,0'
+        [System.Windows.Controls.DockPanel]::SetDock($icon, 'Left')
+        $dock.Children.Add($icon) | Out-Null
+
+        # Buttons in fixed slots (Open, Run as admin, Folder, Help or Readme, GitHub) that share their
+        # widths across every row, so each kind of button lines up in a column down the list.
+        $buttons = New-Object System.Windows.Controls.Grid
+        $buttons.VerticalAlignment = 'Center'
+        foreach ($slot in 'Open', 'Admin', 'Folder', 'Help', 'Repo') {
+            $cd = New-Object System.Windows.Controls.ColumnDefinition
+            $cd.Width = [System.Windows.GridLength]::Auto
+            $cd.SharedSizeGroup = "Row$slot"
+            $buttons.ColumnDefinitions.Add($cd)
+        }
+        $put = {
+            param([int]$Column, $Button)
+            $Button.Margin = '6,0,0,0'; $Button.Padding = '10,3'
+            [System.Windows.Controls.Grid]::SetColumn($Button, $Column)
+            $buttons.Children.Add($Button) | Out-Null
+        }
+        if ($Tool.Target) {
+            $openText = if ($Tool.RequireAdmin) { 'Open as admin' } else { 'Open' }
+            & $put 0 (& $newButton $openText 'PrimaryButton' "Start $($Tool.Name)" @{ Tool = $Tool; Action = 'Open' })
+            if (-not $Tool.RequireAdmin -and @('exe', 'shortcut', 'powershell', 'cmd', 'python') -contains $Tool.Mode) {
+                & $put 1 (& $newButton 'Run as admin' 'QuietButton' 'Start it as administrator (UAC prompt)' @{ Tool = $Tool; Action = 'Admin' })
+            }
+        }
+        & $put 2 (& $newButton 'Folder' 'QuietButton' "Open $($Tool.ProjectPath)" @{ Tool = $Tool; Action = 'Folder' })
+        if ($Tool.HelpPath) {
+            & $put 3 (& $newButton 'Help' 'QuietButton' "Open the help guide`n$($Tool.HelpPath)" @{ Tool = $Tool; Action = 'Help' })
+        } elseif ($Tool.ReadmePath) {
+            & $put 3 (& $newButton 'Readme' 'QuietButton' "Open the README`n$($Tool.ReadmePath)" @{ Tool = $Tool; Action = 'Readme' })
+        }
+        if ($Tool.RepoUrl) {
+            & $put 4 (& $newButton 'GitHub' 'QuietButton' "Open the repo in the browser`n$($Tool.RepoUrl)" @{ Tool = $Tool; Action = 'Repo' })
+        }
+        [System.Windows.Controls.DockPanel]::SetDock($buttons, 'Right')
+        $dock.Children.Add($buttons) | Out-Null
+
+        $grid = New-Object System.Windows.Controls.Grid
+        $grid.VerticalAlignment = 'Center'
+        foreach ($w in 210, 70) {
+            $cd = New-Object System.Windows.Controls.ColumnDefinition; $cd.Width = $w; $grid.ColumnDefinitions.Add($cd)
+        }
+        $grid.ColumnDefinitions.Add((New-Object System.Windows.Controls.ColumnDefinition))
+        $nameText = New-Object System.Windows.Controls.TextBlock
+        $nameText.Text = $Tool.Name
+        $nameText.FontSize = 14; $nameText.FontWeight = 'SemiBold'
+        $nameText.Foreground = $brushName
+        $nameText.TextTrimming = 'CharacterEllipsis'
+        $nameText.VerticalAlignment = 'Center'
+        $grid.Children.Add($nameText) | Out-Null
+        $ver = New-Object System.Windows.Controls.TextBlock
+        $ver.Text = if ($Tool.Version) { "v$($Tool.Version)" } elseif ($Tool.Mode -eq 'url') { 'web app' } else { '' }
+        $ver.Foreground = $brushMuted; $ver.FontSize = 12
+        $ver.VerticalAlignment = 'Center'
+        [System.Windows.Controls.Grid]::SetColumn($ver, 1)
+        $grid.Children.Add($ver) | Out-Null
+        $note = & $getNote $Tool
+        $desc = New-Object System.Windows.Controls.TextBlock
+        $desc.Text = if ($note) { $note } elseif ($Tool.Description) { $Tool.Description } else { $Tool.Folder }
+        $desc.Foreground = if ($note) { $brushWarn } else { $brushDesc }
+        $desc.TextTrimming = 'CharacterEllipsis'
+        $desc.VerticalAlignment = 'Center'
+        $desc.Margin = '0,0,8,0'
+        $desc.ToolTip = if ($note) { "$note`n$($Tool.Description)" } else { $Tool.Description }
+        [System.Windows.Controls.Grid]::SetColumn($desc, 2)
+        $grid.Children.Add($desc) | Out-Null
+        $dock.Children.Add($grid) | Out-Null
+
+        $border.Child = $dock
+        return $border
+    }
+
+    # One tab: the section name and its count, underlined in the highlight colour when chosen.
+    $newTab = {
+        param([string]$Name, [int]$Count, [bool]$Selected, [bool]$Enabled)
+        $tab = New-Object System.Windows.Controls.Border
+        $tab.Padding = '14,7,14,6'
+        $tab.Margin = '0,0,4,0'
+        $tab.BorderThickness = '0,0,0,3'
+        $tab.BorderBrush = if ($Selected) { $brushHighlight } else { [System.Windows.Media.Brushes]::Transparent }
+        $tab.Background = [System.Windows.Media.Brushes]::Transparent
+        $tab.CornerRadius = '4,4,0,0'
+        $tab.Tag = $Name
+        $line = New-Object System.Windows.Controls.StackPanel
+        $line.Orientation = 'Horizontal'
+        $t = New-Object System.Windows.Controls.TextBlock
+        $t.Text = $Name
+        $t.FontSize = 14
+        $t.FontWeight = if ($Selected) { 'SemiBold' } else { 'Normal' }
+        $t.Foreground = if ($Selected) { $brushName } else { $brushDesc }
+        $line.Children.Add($t) | Out-Null
+        $n = New-Object System.Windows.Controls.TextBlock
+        $n.Text = "$Count"
+        $n.FontSize = 12
+        $n.Foreground = $brushMuted
+        $n.Margin = '7,1,0,0'
+        $n.VerticalAlignment = 'Center'
+        $line.Children.Add($n) | Out-Null
+        $tab.Child = $line
+        if (-not $Enabled) { $tab.Opacity = 0.45; return $tab }
+        $tab.Cursor = [System.Windows.Input.Cursors]::Hand
+        $tab.Add_MouseEnter({ $args[0].Background = $brushTabHover })
+        $tab.Add_MouseLeave({ $args[0].Background = [System.Windows.Media.Brushes]::Transparent })
+        $tab.Add_MouseLeftButtonUp({
+            param($s, $e)
+            $state.Tab = [string]$s.Tag
+            $settings['Tab'] = $state.Tab
+            Save-LauncherSettings -Path $settingsPath -Settings $settings
+            if ($ui.SearchBox.Text) { $ui.SearchBox.Text = '' } else { & $render }   # clearing the search renders
+            $e.Handled = $true
+        })
+        return $tab
+    }
+
+    $saveFolds = {
+        $settings['Collapsed'] = @($state.Collapsed | Sort-Object)
+        Save-LauncherSettings -Path $settingsPath -Settings $settings
+    }
+
     $render = {
         $panel = $ui.ToolPanel
+        [System.Windows.Controls.Grid]::SetIsSharedSizeScope($panel, $true)   # list rows line their buttons up
         $panel.Children.Clear()
         $query = $ui.SearchBox.Text.Trim()
         $shown = @($state.Tools | Where-Object {
@@ -1653,28 +1830,91 @@ $(Get-LauncherScrollStyle)
         }
         $ui.EmptyText.Visibility = 'Collapsed'
 
-        $groups = $shown | Group-Object { if ($_.Category) { $_.Category } else { $defaultCategory } }
-        $ordered = $groups | Sort-Object @{ Expression = {
+        $sectionOf = { if ($_.Category) { $_.Category } else { $defaultCategory } }
+        $orderBy = @{ Expression = {
                 $i = [array]::IndexOf([object[]]$categoryOrder, $_.Name)
                 if ($i -lt 0) { 1000 } else { $i }
-            } }, Name
+            } }
+        $groups = $shown | Group-Object $sectionOf
+        $ordered = $groups | Sort-Object $orderBy, Name
+
+        if ($sectionTabs) {
+            # Tabs: every section with tools gets a tab. Without a search only the chosen tab's tools
+            # show; while searching, every match shows under its section heading, and the tabs give
+            # the number of matches (sections with none are dimmed).
+            $ui.TabBar.Visibility = 'Visible'
+            $ui.TabPanel.Children.Clear()
+            $allGroups = @($state.Tools | Group-Object $sectionOf | Sort-Object $orderBy, Name)
+            $names = @($allGroups | ForEach-Object { $_.Name })
+            if ($names -notcontains $state.Tab) { $state.Tab = $names[0] }
+            foreach ($ag in $allGroups) {
+                $hits = @($ordered | Where-Object { $_.Name -eq $ag.Name })
+                $count = if ($query) { if ($hits) { $hits[0].Count } else { 0 } } else { $ag.Count }
+                $selected = (-not $query) -and ($ag.Name -eq $state.Tab)
+                $ui.TabPanel.Children.Add((& $newTab $ag.Name $count $selected ((-not $query) -or $count -gt 0))) | Out-Null
+            }
+            if (-not $query) { $ordered = @($ordered | Where-Object { $_.Name -eq $state.Tab }) }
+        } else {
+            $ui.TabBar.Visibility = 'Collapsed'
+        }
+
         foreach ($g in $ordered) {
-            $header = New-Object System.Windows.Controls.DockPanel
+            # A search opens every section that holds a match; otherwise folded sections stay folded.
+            $folded = (-not $sectionTabs) -and (-not $query) -and $state.Collapsed.Contains($g.Name)
+            if ($sectionTabs -and -not $query) {
+                $box = if ($state.View -eq 'List') { New-Object System.Windows.Controls.StackPanel } else { New-Object System.Windows.Controls.WrapPanel }
+                foreach ($t in ($g.Group | Sort-Object Name)) {
+                    $box.Children.Add($(if ($state.View -eq 'List') { & $newRow $t } else { & $newTile $t })) | Out-Null
+                }
+                $panel.Children.Add($box) | Out-Null
+                continue
+            }
+            $header = New-Object System.Windows.Controls.Border
+            $header.Background = [System.Windows.Media.Brushes]::Transparent
             $header.Margin = '0,4,12,10'
+            $header.Tag = $g.Name
+            if (-not $query -and -not $sectionTabs) {
+                $header.Cursor = [System.Windows.Input.Cursors]::Hand
+                $header.ToolTip = if ($folded) { 'Click to open this section' } else { 'Click to fold this section away' }
+                $header.Add_MouseLeftButtonUp({
+                    param($s, $e)
+                    $name = [string]$s.Tag
+                    if (-not $state.Collapsed.Remove($name)) { $null = $state.Collapsed.Add($name) }
+                    & $saveFolds
+                    & $render
+                    $e.Handled = $true
+                })
+            }
+            $line = New-Object System.Windows.Controls.DockPanel
+            $chev = New-Object System.Windows.Controls.TextBlock
+            $chev.Text = if ($folded) { [string][char]0xE76C } else { [string][char]0xE70D }   # chevron right / down
+            if ($sectionTabs) { $chev.Visibility = 'Collapsed' }
+            $chev.FontFamily = 'Segoe MDL2 Assets'; $chev.FontSize = 10
+            $chev.Foreground = $brushMuted
+            $chev.VerticalAlignment = 'Center'; $chev.Width = 14; $chev.Margin = '0,1,4,0'
+            $line.Children.Add($chev) | Out-Null
             $bar = New-Object System.Windows.Controls.Border
             $bar.Width = 4; $bar.CornerRadius = 2; $bar.Background = $brushHighlight; $bar.Margin = '0,1,8,1'
-            $header.Children.Add($bar) | Out-Null
+            $line.Children.Add($bar) | Out-Null
             $h = New-Object System.Windows.Controls.TextBlock
             $h.Text = "$($g.Name)  ($($g.Count))"
             $h.FontSize = 14; $h.FontWeight = 'SemiBold'
             $h.Foreground = $brushName
-            $header.Children.Add($h) | Out-Null
+            $line.Children.Add($h) | Out-Null
+            $header.Child = $line
             $panel.Children.Add($header) | Out-Null
+            if ($folded) { continue }
 
-            $wrap = New-Object System.Windows.Controls.WrapPanel
-            $wrap.Margin = '0,0,0,10'
-            foreach ($t in ($g.Group | Sort-Object Name)) { $wrap.Children.Add((& $newTile $t)) | Out-Null }
-            $panel.Children.Add($wrap) | Out-Null
+            if ($state.View -eq 'List') {
+                $box = New-Object System.Windows.Controls.StackPanel
+                $box.Margin = '0,0,0,12'
+                foreach ($t in ($g.Group | Sort-Object Name)) { $box.Children.Add((& $newRow $t)) | Out-Null }
+            } else {
+                $box = New-Object System.Windows.Controls.WrapPanel
+                $box.Margin = '0,0,0,10'
+                foreach ($t in ($g.Group | Sort-Object Name)) { $box.Children.Add((& $newTile $t)) | Out-Null }
+            }
+            $panel.Children.Add($box) | Out-Null
         }
     }
 
@@ -1807,6 +2047,16 @@ $(Get-LauncherScrollStyle)
         }
     })
     $ui.RefreshButton.Add_Click({ & $scan })
+    $setViewText = { $ui.ViewButton.Content = "View: $($state.View)" }
+    & $setViewText
+    $ui.ViewButton.Add_Click({
+        $state.View = if ($state.View -eq 'List') { 'Tiles' } else { 'List' }
+        $settings['View'] = $state.View
+        Save-LauncherSettings -Path $settingsPath -Settings $settings
+        & $setViewText
+        & $render
+        & $setStatus $(if ($state.View -eq 'List') { 'Showing the tools as a compact list.' } else { 'Showing the tools as tiles.' })
+    })
     $ui.FolderButton.Add_Click({
         $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
         $dlg.Description = "Choose the folder that holds the tool folders (each with Builds\ and Source\ inside)."
@@ -1865,15 +2115,18 @@ $(Get-LauncherScrollStyle)
     })
     $showHelp = {
         $lines = @(
-            'Every tool in the folders below is listed as a tile, grouped by category.',
+            'Every tool in the folders below is listed under its section, as a tile or as a row in the list.',
             '',
             'Starting a tool',
             "    Double-click a tile, or press Open. Run as admin starts it as administrator (Windows asks first). Tiles say when a tool has no build yet.",
             '',
             'Finding a tool',
-            "    Type in the search box (Ctrl+F) to filter by name, description or category. Enter starts the only match; Esc clears the search.",
+            "    Type in the search box (Ctrl+F) to filter by name, description or section. $(if ($sectionTabs) { 'While you search, matches from every section show, and each tab gives its number of matches.' } else { 'Sections that hold a match open while you search.' }) Enter starts the only match; Esc clears the search.",
             '',
-            'On each tile',
+            'Sections and views',
+            $(if ($sectionTabs) { "    Each section has a tab along the top; click one to show its tools. The launcher remembers the tab. View switches between tiles and a compact list. A tool's section comes from Category in its launcher.json." } else { "    Click a section's heading to fold it away or open it again; the launcher remembers which are folded. View switches between tiles and a compact list. A tool's section comes from Category in its launcher.json." }),
+            '',
+            'On each tile or row',
             "    Folder opens the tool's project folder; Readme, Help and GitHub open its README, guide and repo when it has them. The version and date are the newest build's.",
             '',
             'The tools folder',

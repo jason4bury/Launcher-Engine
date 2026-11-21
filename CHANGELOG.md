@@ -6,6 +6,31 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.10] - 2026-11-21
+
+### Added
+- **Section tabs.** With `"SectionTabs": true` in the profile, each section gets a tab along the
+  top with its tool count, and only the chosen tab's tools show. The launcher remembers the tab.
+  While you search, matches from every section show under their headings and each tab gives its
+  number of matches (tabs with none are dimmed).
+- **Window size from the profile.** `WindowWidth` and `WindowHeight` set the window's size (kept
+  inside the screen), and a shorter window is centred top to bottom. Without them the window is
+  1060 wide and the full height of the screen, as before.
+- **Folding sections** (without tabs). Click a section's heading to fold it away, and again to open it. A small
+  arrow shows which way it is, the heading keeps its tool count, and the launcher remembers the
+  folded sections in `settings.json`.
+- **List view.** A **View** button beside Tools folder... switches between the tiles and a compact
+  list: one row per tool with its icon, name, version and description, and the same Open, Run as
+  admin, Folder, Help and GitHub buttons. The choice is remembered.
+- A tool's `launcher.json` `Target` counts as its chosen start file, so a tool that only runs from
+  `Source\` (such as a console script) no longer shows the "No build in Builds\" note.
+
+### Changed
+- **Search opens folded sections.** While you search, every section that holds a match is shown
+  open, folded or not; clearing the search folds them again.
+- Help and the search tip say "section" rather than "category", and Help explains folding and the
+  list view.
+
 ## [1.09] - 2026-11-20
 
 ### Fixed

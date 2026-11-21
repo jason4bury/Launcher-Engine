@@ -6,7 +6,7 @@
 
 The shared code behind the Home Launcher: finds tools from the folder layout and shows them as tiles you can search and start.
 
-![Version](https://img.shields.io/badge/version-v1.09-blue) ![Platform](https://img.shields.io/badge/platform-Windows-0078D6) ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207-5391FE) ![Licence](https://img.shields.io/badge/licence-MIT-green) ![Last commit](https://img.shields.io/github/last-commit/jason4bury/Launcher-Engine)
+![Version](https://img.shields.io/badge/version-v1.10-blue) ![Platform](https://img.shields.io/badge/platform-Windows-0078D6) ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207-5391FE) ![Licence](https://img.shields.io/badge/licence-MIT-green) ![Last commit](https://img.shields.io/github/last-commit/jason4bury/Launcher-Engine)
 
 ## ✨ Features
 
@@ -27,7 +27,7 @@ One PowerShell/WPF codebase, so a fix or feature lands in every launcher at once
 
 - Falls back to the main script in `Source\src\` (`build.json`'s `EntryScript`, or `<Folder>.ps1` / `.py` / `.html`) when there's no build.
 - Starts exes, script-release shortcuts (`.lnk`), PowerShell and Python scripts, batch files, web pages and web-app URLs, with **Run as admin**.
-- The window: tiles grouped by category, search, quick links (folder, help, GitHub), status bar, About and Exit buttons, keyboard shortcuts, and colours, logo and titles from the profile.
+- The window: tools grouped in sections, shown as tabs (`SectionTabs`) or as headings that fold away (remembered), tiles or a compact list (the View button), search that opens folded sections holding a match, quick links (folder, help, GitHub), status bar, About and Exit buttons, keyboard shortcuts, and colours, logo and titles from the profile.
 - **Private-tool lock**: private tools (anything under the profile's `PrivateRoots`, or flagged `"Private": true`) stay completely hidden until Ctrl+Shift+U and the launcher password. **Lock**, the same keys, idle time or closing the window hides them again. Only a salted PBKDF2-SHA256 hash of the password is kept.
 - **Vault**: if the profile names a BitLocker VHDX, unlocking also attaches and unlocks it with the same password (UAC prompt), and locking locks and detaches it, unless a tool is still running from it.
 
@@ -80,6 +80,8 @@ Builds a made-up tools folder in `%TEMP%`, checks what discovery finds (includin
 | `Logo`, `Icon` | Header and window images (file names) |
 | `Theme.Accent`, `AccentText`, `Highlight`, `Background` | Colours, `#RRGGBB` |
 | `Categories`, `DefaultCategory` | Category order, and the category for tools without one |
+| `SectionTabs` | `true` shows one tab per category instead of headings down the page |
+| `WindowWidth`, `WindowHeight` | Window size (default 1060 wide, full screen height) |
 | `Exclude` | Folder names to skip |
 | `Tools` | Per-tool defaults by folder name (any `launcher.json` setting) |
 | `PrivateLock` | `true` turns on the private-tool lock (Ctrl+Shift+U) |
