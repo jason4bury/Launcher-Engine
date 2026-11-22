@@ -22,7 +22,7 @@
 
     Private tools (the profile's PrivateRoots, e.g. Home\Private\, or any
     tool flagged "Private": true) stay hidden until they are unlocked with
-    the launcher password (Ctrl+Shift+U). If the profile names a Vault, the
+    the launcher password (the Unlock button or Ctrl+Shift+U). If the profile names a Vault, the
     same password also attaches and unlocks the BitLocker VHDX that holds
     them, and locking (button, idle time or closing) locks it again.
 
@@ -36,7 +36,7 @@
 #Requires -Version 5.1
 
 $script:EngineName    = 'Launcher Engine'
-$script:EngineVersion = '1.10'
+$script:EngineVersion = '1.11'
 $script:EngineDate    = '2026-11-16'
 
 # ===========================================================================
@@ -1315,8 +1315,8 @@ $(Get-LauncherScrollStyle)
         <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
           <Button x:Name="PasswordButton" Style="{StaticResource HeaderButton}" Content="Password..." Visibility="Collapsed"
                   ToolTip="Change the password for private tools"/>
-          <Button x:Name="LockButton" Style="{StaticResource HeaderButton}" Content="Lock" Visibility="Collapsed"
-                  ToolTip="Hide the private tools again (Ctrl+Shift+U)"/>
+          <Button x:Name="LockButton" Style="{StaticResource HeaderButton}" Content="Unlock" Visibility="Collapsed"
+                  ToolTip="Show the private tools (Ctrl+Shift+U)"/>
           <Button x:Name="LookButton" Style="{StaticResource HeaderButton}" Content="Look" ToolTip="Light, dark, or the same as Windows. Used the next time the launcher starts."/>
           <Button x:Name="HelpButton" Style="{StaticResource HeaderButton}" Content="Help" ToolTip="How the launcher works (F1)"/>
           <Button x:Name="AboutButton" Style="{StaticResource HeaderButton}" Content="About" ToolTip="Version, licence and keyboard shortcuts"/>
@@ -1939,9 +1939,11 @@ $(Get-LauncherScrollStyle)
 
     $showUnlocked = {
         param([bool]$On)
-        $vis = if ($On) { 'Visible' } else { 'Collapsed' }
-        $ui.LockButton.Visibility = $vis
-        $ui.PasswordButton.Visibility = $vis
+        # One button for both: Unlock while locked, Lock while unlocked (Ctrl+Shift+U does the same).
+        $ui.LockButton.Visibility = if ($privateLock) { 'Visible' } else { 'Collapsed' }
+        $ui.LockButton.Content = if ($On) { 'Lock' } else { 'Unlock' }
+        $ui.LockButton.ToolTip = if ($On) { 'Hide the private tools again (Ctrl+Shift+U)' } else { 'Show the private tools: asks for the password (Ctrl+Shift+U)' }
+        $ui.PasswordButton.Visibility = if ($On) { 'Visible' } else { 'Collapsed' }
     }
 
     $unlock = {
@@ -2068,7 +2070,8 @@ $(Get-LauncherScrollStyle)
             & $scan
         }
     })
-    $ui.LockButton.Add_Click({ & $lock 'manual' })
+    $ui.LockButton.Add_Click({ if ($state.Unlocked) { & $lock 'manual' } else { & $unlock } })
+    & $showUnlocked $false
     $ui.PasswordButton.Add_Click({
         $current = Show-LauncherPasswordDialog -Owner $window -Title 'Change password' -Prompt 'Current password' -Accent $accent -AccentText $accentText
         if (-not $current) { return }
@@ -2097,7 +2100,7 @@ $(Get-LauncherScrollStyle)
             "Settings: $settingsPath"
         )
         if ($AppNote) { $lines += @('', $AppNote) }
-        if ($state.Unlocked) { $lines += @('', 'Private tools are unlocked. Ctrl+Shift+U or Lock hides them again.') }
+        if ($state.Unlocked) { $lines += @('', 'Private tools are unlocked. Lock (or Ctrl+Shift+U) hides them again.') }
         $null = Show-LauncherMessage -Owner $window -Text ($lines -join "`n") -Kind 'Information' -Heading "About $AppName" -Buttons @('Close') `
             -Accent $accent -AccentText $accentText -Background $background
     })
@@ -2135,7 +2138,7 @@ $(Get-LauncherScrollStyle)
         # Private tools are only explained once they're unlocked, so the Help gives nothing away.
         if ($privateLock -and $state.Unlocked) {
             $lines += @('', 'Private tools',
-                "    Private tools show while unlocked with your password (Ctrl+Shift+U). Lock, closing the launcher or $idleMinutes minutes without use hides them again." + $(if ($vault) { ' Unlocking also opens the Private vault (Windows asks for administrator rights), and locking closes it.' } else { '' }))
+                "    Private tools show while unlocked with your password (the Unlock button or Ctrl+Shift+U). Lock, closing the launcher or $idleMinutes minutes without use hides them again." + $(if ($vault) { ' Unlocking also opens the Private vault (Windows asks for administrator rights), and locking closes it.' } else { '' }))
         }
         $lines += @('', 'Look',
             "    Look switches between Light, Dark and the same as Windows; the new look is used the next time the launcher starts.",

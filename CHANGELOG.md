@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.11] - 2026-11-22
+
+### Added
+- **Unlock/Lock button.** With `PrivateLock` on, the header has an **Unlock** button that asks for the
+  password, and turns into **Lock** while the private tools show. Ctrl+Shift+U still does the same.
+
 ## [1.10] - 2026-11-21
 
 ### Added
