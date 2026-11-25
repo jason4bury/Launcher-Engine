@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.12] - 2026-11-25
+
+### Added
+- **Web addresses kept on this PC.** `"Urls"` in `settings.json` (tool folder name to address, such as
+  `{ "Disk-Space-Over-Time": "http://192.168.1.20:3060" }`) opens a web tool at that address instead of
+  the profile's, so an app running on a NAS needs no address in the profile or its repo.
+
 ## [1.11] - 2026-11-22
 
 ### Added

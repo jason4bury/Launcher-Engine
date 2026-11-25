@@ -6,7 +6,7 @@
 
 The shared code behind the Home Launcher: finds tools from the folder layout and shows them as tiles you can search and start.
 
-![Version](https://img.shields.io/badge/version-v1.11-blue) ![Platform](https://img.shields.io/badge/platform-Windows-0078D6) ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207-5391FE) ![Licence](https://img.shields.io/badge/licence-MIT-green) ![Last commit](https://img.shields.io/github/last-commit/jason4bury/Launcher-Engine)
+![Version](https://img.shields.io/badge/version-v1.12-blue) ![Platform](https://img.shields.io/badge/platform-Windows-0078D6) ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207-5391FE) ![Licence](https://img.shields.io/badge/licence-MIT-green) ![Last commit](https://img.shields.io/github/last-commit/jason4bury/Launcher-Engine)
 
 ## ✨ Features
 
@@ -92,7 +92,7 @@ Builds a made-up tools folder in `%TEMP%`, checks what discovery finds (includin
 
 **launcher.json** (optional, in a tool's project folder or `Source\`): `Name`, `Category`, `Description`, `Icon`, `Help`, `Repo`, `RequireAdmin`, `Private`, `Hidden`, `Target` (relative to the project folder), `RunMode` (`exe`, `shortcut`, `powershell`, `python`, `cmd`, `html`, `url`) and `Url`. It wins over the profile, which wins over `build.json`.
 
-**Settings** are saved in `%APPDATA%\<AppName>\settings.json`: `Roots`, when a folder is chosen with **Tools folder...**, and `PrivatePassword` (salt and hash only). Delete `PrivatePassword` from the file to set a new password on the next unlock. The vault helper runs from `%LOCALAPPDATA%\<AppName>\vault\`.
+**Settings** are saved in `%APPDATA%\<AppName>\settings.json`: `Roots`, when a folder is chosen with **Tools folder...**, `PrivatePassword` (salt and hash only), and `Urls`, which you add yourself to open a web tool at an address on this PC only: `"Urls": { "<tool folder>": "http://192.168.1.20:3060" }` (handy for a web app that runs on a NAS, as the address then never goes in the profile or a repo). Delete `PrivatePassword` from the file to set a new password on the next unlock. The vault helper runs from `%LOCALAPPDATA%\<AppName>\vault\`.
 
 ## 📝 Changelog
 

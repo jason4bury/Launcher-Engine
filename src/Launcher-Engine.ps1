@@ -36,7 +36,7 @@
 #Requires -Version 5.1
 
 $script:EngineName    = 'Launcher Engine'
-$script:EngineVersion = '1.11'
+$script:EngineVersion = '1.12'
 $script:EngineDate    = '2026-11-16'
 
 # ===========================================================================
@@ -364,12 +364,16 @@ function Get-LauncherTools {
        skipped. Private tools (flagged "Private", or anything under
        PrivateRoots) are only returned with -IncludePrivate, and never when
        the profile has PrivateLock turned off. Private tools without a
-       category go under the profile's PrivateCategory ("Private"). #>
+       category go under the profile's PrivateCategory ("Private").
+       UrlOverrides (settings.json "Urls", tool folder name -> address) sets
+       a web tool's address on this PC only, such as a web app that runs on
+       a NAS, so the address never has to go in the profile or a repo. #>
     param(
         [Parameter(Mandatory)][object]$LauncherProfile,
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Roots,
         [string[]]$PrivateRoots = @(),
-        [switch]$IncludePrivate
+        [switch]$IncludePrivate,
+        [object]$UrlOverrides
     )
     $exclude = @(Get-LauncherValue @($LauncherProfile) @('Exclude')) | Where-Object { $_ }
     $entries = Get-LauncherValue @($LauncherProfile) @('Tools')
@@ -402,6 +406,10 @@ function Get-LauncherTools {
                 continue
             }
             if (-not $tool -or $tool.Hidden) { continue }
+            if ($UrlOverrides -and $tool.Mode -eq 'url') {
+                $own = [string](Get-LauncherValue @($UrlOverrides) @($dir.Name))
+                if ($own -match '^https?://') { $tool.Target = $own }
+            }
             if ($tool.Private) {
                 if (-not $allowPrivate) { continue }
                 if (-not $tool.Category) { $tool.Category = $privateCategory }
@@ -1921,7 +1929,7 @@ $(Get-LauncherScrollStyle)
     $scan = {
         $state.Roots = @(Resolve-LauncherRoots -LauncherProfile $p -LauncherHome $LauncherHome -Settings $settings)
         $privateRoots = @(Resolve-LauncherRoots -LauncherProfile $p -LauncherHome $LauncherHome -Key 'PrivateRoots')
-        $state.Tools = @(Get-LauncherTools -LauncherProfile $p -Roots $state.Roots -PrivateRoots $privateRoots -IncludePrivate:($state.Unlocked))
+        $state.Tools = @(Get-LauncherTools -LauncherProfile $p -Roots $state.Roots -PrivateRoots $privateRoots -IncludePrivate:($state.Unlocked) -UrlOverrides $settings['Urls'])
         $count = $state.Tools.Count
         $toolWord = if ($count -eq 1) { 'tool' } else { 'tools' }
         $sub = if ($subtitle) { "$subtitle  $dot  " } else { '' }
